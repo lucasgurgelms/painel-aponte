@@ -271,7 +271,7 @@ function setPeriodo(p){
     return; // espera o usuário escolher as datas e clicar Aplicar
   }
   if(cr) cr.classList.add('hidden');
-  const now=new Date(2026,4,31); // referência maio/2026 (ajustar p/ data real depois)
+  const now=new Date(); // mês corrente real
   const y=now.getFullYear(), m=now.getMonth();
   const iso=d=>d.toISOString().slice(0,10);
   if(p==='mes'){ dataDe=iso(new Date(y,m,1)); dataAte=iso(new Date(y,m+1,0)); }
@@ -408,7 +408,7 @@ const SCREENS={
       <div class="card"><div class="lbl">Entradas</div><div class="val" style="color:${COL.teal}">${fmt(t.entradas)}</div></div>
       <div class="card"><div class="lbl">Saídas</div><div class="val" style="color:${COL.red}">${fmt(t.saidas)}</div></div>
       <div class="card"><div class="lbl">Resultado</div><div class="val" style="color:${t.resultado>=0?COL.blue:COL.red}">${fmt(t.resultado)}</div></div>
-      <div class="card"><div class="lbl">Lançamentos</div><div class="val">${analytics.qtdLancamentos||0}</div></div>
+      <div class="card"><div class="lbl">Margem</div><div class="val" style="color:${t.resultado>=0?COL.blue:COL.red}">${t.entradas?((t.resultado/t.entradas*100).toFixed(1).replace('.',','))+'%':'—'}</div><div class="sub">resultado ÷ entradas</div></div>
     </div>
     <h3 style="font-size:13.5px;margin-bottom:10px">Resultado por unidade</h3>
     <div class="panel">${u.map(x=>bar(x.nome,x.resultado,maxU,x.resultado>=0?COL.teal:COL.red)).join('')||'<div style="color:var(--text2)">Sem dados de unidade.</div>'}</div>`;
