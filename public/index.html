@@ -175,10 +175,36 @@ const COL = { teal:'#1baf7a', red:'#e34948', amber:'#eda100', blue:'#3987e5',
 
 // ---------- boot ----------
 async function boot(){
+  // Captura o tipo do link ANTES do client processar/limpar o hash.
+  const hash = new URLSearchParams((location.hash||'').replace(/^#/,''));
+  const tipoLink = hash.get('type');
   const cfg = await fetch('/api/config').then(r=>r.json());
   supa = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+  // Convite ou recuperação de senha → tela de definir senha.
+  if (tipoLink==='invite' || tipoLink==='recovery'){ mostrarDefinirSenha(); return; }
   const { data:{ session } } = await supa.auth.getSession();
   if (session){ sessionUser=session.user; mostrarApp(); }
+}
+// Tela para quem chegou por convite/recuperação criar a própria senha.
+function mostrarDefinirSenha(){
+  const box=document.getElementById('login');
+  box.innerHTML=`<div class="login-card">
+    <h1>A Ponte</h1><p>Crie sua senha de acesso ao painel</p>
+    <label>Nova senha</label>
+    <input id="np" type="password" placeholder="mínimo 6 caracteres" autocomplete="new-password">
+    <button class="btn" onclick="definirSenha()">Salvar e entrar</button>
+    <div class="err" id="np-err"></div></div>`;
+  box.classList.remove('hidden');
+  document.getElementById('app').classList.add('hidden');
+}
+async function definirSenha(){
+  const senha=document.getElementById('np').value;
+  const err=document.getElementById('np-err'); err.textContent='';
+  if(!senha || senha.length<6){ err.textContent='Use ao menos 6 caracteres.'; return; }
+  const { error } = await supa.auth.updateUser({ password: senha });
+  if(error){ err.textContent=error.message; return; }
+  const { data:{ user } } = await supa.auth.getUser();
+  sessionUser=user; history.replaceState(null,'',location.pathname); mostrarApp();
 }
 async function entrar(){
   const email=document.getElementById('email').value.trim();
@@ -593,7 +619,7 @@ window.setSub=setSub;
 
 window.setDreView=v=>{ window._dreView=v; render(); };
 window.go=go; window.setPeriodo=setPeriodo; window.setRegime=setRegime;
-window.entrar=entrar; window.sair=sair;
+window.entrar=entrar; window.sair=sair; window.definirSenha=definirSenha;
 
 boot();
 </script>
