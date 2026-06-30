@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel Financeiro · Igreja A Ponte</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg:#0f1115; --surface:#171a21; --surface2:#1d2129; --surface0:#0c0e12;
+    --border:#272c36; --text:#e6e8ec; --text2:#9aa0ac; --muted:#6b7280;
+    --accent:#3b82f6; --accent-bg:#15233d; --teal:#1baf7a; --red:#e34948;
+    --amber:#eda100; --blue:#3987e5; --violet:#9085e9; --orange:#eb6834; --green:#3b9c3b;
+    --radius:8px;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--bg); color:var(--text); font-size:14px; line-height:1.5; }
+  .hidden { display:none !important; }
+
+  /* Login */
+  #login { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .login-card { background:var(--surface); border:0.5px solid var(--border); border-radius:16px;
+    padding:36px 32px; width:100%; max-width:380px; }
+  .login-card h1 { font-size:20px; font-weight:600; margin-bottom:4px; }
+  .login-card p { color:var(--text2); font-size:13px; margin-bottom:24px; }
+  input, select { width:100%; background:var(--surface0); border:0.5px solid var(--border);
+    border-radius:var(--radius); padding:10px 12px; color:var(--text); font-size:14px; outline:none; }
+  input:focus, select:focus { border-color:var(--accent); }
+  label { font-size:12px; color:var(--text2); display:block; margin-bottom:6px; margin-top:14px; }
+  .btn { background:var(--accent); color:#fff; border:none; border-radius:var(--radius);
+    padding:11px; font-size:14px; font-weight:500; cursor:pointer; width:100%; margin-top:20px; }
+  .btn:hover { opacity:.9; }
+  .btn-ghost { background:transparent; border:0.5px solid var(--border); color:var(--text2);
+    width:auto; padding:8px 14px; margin-top:0; }
+  .err { color:var(--red); font-size:12.5px; margin-top:12px; min-height:16px; }
+
+  /* App shell */
+  #app { max-width:1100px; margin:0 auto; padding:20px; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
+    gap:12px; margin-bottom:16px; }
+  .topbar h2 { font-size:18px; font-weight:600; }
+  .topbar .sub { font-size:12px; color:var(--text2); }
+  .toggle { display:inline-flex; border:0.5px solid var(--border); border-radius:var(--radius); overflow:hidden; }
+  .toggle span { padding:7px 13px; font-size:12.5px; cursor:pointer; color:var(--text2); }
+  .toggle span.on { background:var(--accent-bg); color:var(--accent); }
+
+  .periods { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+  .periods span { padding:6px 12px; font-size:12.5px; border:0.5px solid var(--border);
+    border-radius:var(--radius); color:var(--text2); cursor:pointer; }
+  .periods span.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+  .tabs { display:flex; gap:2px; flex-wrap:wrap; border-bottom:0.5px solid var(--border); margin-bottom:18px; }
+  .tabs button { border:none; background:none; padding:9px 12px; font-size:12.5px; cursor:pointer;
+    color:var(--text2); border-bottom:2px solid transparent; display:flex; align-items:center; gap:5px; }
+  .tabs button.on { color:var(--accent); border-bottom-color:var(--accent); }
+
+  .grid { display:grid; gap:11px; }
+  .cards { grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); }
+  .card { background:var(--surface); border-radius:12px; padding:13px 15px; }
+  .card .lbl { font-size:11.5px; color:var(--text2); margin-bottom:5px; }
+  .card .val { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .card .sub { font-size:10.5px; color:var(--muted); margin-top:2px; }
+
+  .panel { background:var(--surface); border-radius:12px; padding:16px; }
+  .panel h3 { font-size:13.5px; font-weight:600; margin-bottom:12px; }
+
+  .barrow { margin-bottom:9px; }
+  .barrow .top { display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:3px; }
+  .barrow .track { height:7px; background:var(--surface0); border-radius:4px; overflow:hidden; }
+  .barrow .fill { height:100%; }
+
+  .filterbar { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; align-items:center; }
+  .search { flex:1; min-width:140px; display:flex; align-items:center; gap:6px;
+    border:0.5px solid var(--border); border-radius:var(--radius); padding:0 10px; }
+  .search input { border:none; background:none; padding:8px 0; }
+  .chip { padding:5px 11px; font-size:11.5px; border:0.5px solid var(--border);
+    border-radius:var(--radius); color:var(--text2); }
+
+  .subnav { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+  .subnav span { padding:6px 12px; font-size:12.5px; border-radius:20px; cursor:pointer;
+    border:0.5px solid var(--border); color:var(--text2); }
+  .subnav span.on { background:var(--accent-bg); color:var(--accent); border-color:transparent; }
+
+  .dre-row { display:flex; justify-content:space-between; padding:8px 14px; font-size:13px; }
+  .dre-row.h { font-weight:600; border-top:0.5px solid var(--border); }
+  .dre-row.i { color:var(--text2); padding-left:20px; cursor:pointer; }
+  .dre-row.sub { color:var(--muted); padding-left:36px; font-size:12px; }
+  .dre-row.s { font-weight:600; background:var(--surface0); border-radius:6px; }
+  .dre-row.r { font-weight:600; background:var(--accent-bg); border-radius:6px; color:var(--accent); }
+  .num { font-variant-numeric:tabular-nums; }
+
+  .alert { border-radius:12px; padding:12px 14px; cursor:pointer; }
+  .alert .lbl { font-size:11.5px; display:flex; align-items:center; gap:5px; }
+  .alert .val { font-size:18px; font-weight:600; margin-top:3px; }
+
+  .loading { text-align:center; padding:40px; color:var(--text2); font-size:13px; }
+  .unit-card { background:var(--surface); border-radius:12px; padding:13px; }
+  .unit-card .name { font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:7px; margin-bottom:9px; }
+  .unit-card .dot { width:9px; height:9px; border-radius:50%; }
+  .unit-card .line { display:flex; justify-content:space-between; font-size:11.5px; color:var(--text2); margin-bottom:2px; }
+  .unit-card .res { display:flex; justify-content:space-between; font-size:13px; font-weight:600;
+    border-top:0.5px solid var(--border); padding-top:6px; margin-top:4px; }
+
+  table.metas { width:100%; border-collapse:collapse; font-size:13px; }
+  table.metas td { padding:9px 6px; border-bottom:0.5px solid var(--border); }
+  table.metas input { width:120px; padding:6px 8px; }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login">
+  <div class="login-card">
+    <h1>A Ponte</h1>
+    <p>Painel Financeiro · acesse com suas credenciais</p>
+    <label>E-mail</label>
+    <input id="email" type="email" placeholder="seu@email.com" autocomplete="username">
+    <label>Senha</label>
+    <input id="senha" type="password" placeholder="••••••••" autocomplete="current-password">
+    <button class="btn" onclick="entrar()">Entrar</button>
+    <div class="err" id="login-err"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <div class="topbar">
+    <div>
+      <h2>Painel Financeiro · Igreja A Ponte</h2>
+      <div class="sub" id="conn-status">Dados ao vivo Conta Azul</div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <div class="toggle" id="regime-toggle">
+        <span class="on" data-r="caixa" onclick="setRegime('caixa')">Caixa</span>
+        <span data-r="competencia" onclick="setRegime('competencia')">Competência</span>
+      </div>
+      <button class="btn btn-ghost" onclick="sair()">Sair</button>
+    </div>
+  </div>
+
+  <div class="periods" id="periods">
+    <span class="on" data-p="mes" onclick="setPeriodo('mes')">Mês</span>
+    <span data-p="tri" onclick="setPeriodo('tri')">Trimestre</span>
+    <span data-p="sem" onclick="setPeriodo('sem')">6 meses</span>
+    <span data-p="ano" onclick="setPeriodo('ano')">Ano</span>
+    <span data-p="custom" onclick="setPeriodo('custom')">Personalizado</span>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+  <div id="screen"><div class="loading">Carregando…</div></div>
+</div>
+
+<script>
+// ---------- estado ----------
+let supa, sessionUser=null;
+let regime='caixa', periodo='mes';
+let dataDe='2026-05-01', dataAte='2026-05-31';
+let analytics=null, metas={}, activeTab='geral', loading=false;
+
+const fmt = n => (n<0?'-':'')+'R$ '+Math.abs(Math.round(n||0)).toLocaleString('pt-BR');
+const fmtk = n => (n<0?'-':'')+'R$ '+(Math.abs(n||0)/1000).toFixed(1).replace('.',',')+'k';
+const COL = { teal:'#1baf7a', red:'#e34948', amber:'#eda100', blue:'#3987e5',
+  violet:'#9085e9', green:'#3b9c3b', orange:'#eb6834' };
+
+// ---------- boot ----------
+async function boot(){
+  const cfg = await fetch('/api/config').then(r=>r.json());
+  supa = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+  const { data:{ session } } = await supa.auth.getSession();
+  if (session){ sessionUser=session.user; mostrarApp(); }
+}
+async function entrar(){
+  const email=document.getElementById('email').value.trim();
+  const senha=document.getElementById('senha').value;
+  const err=document.getElementById('login-err'); err.textContent='';
+  const { data, error } = await supa.auth.signInWithPassword({ email, password:senha });
+  if (error){ err.textContent='E-mail ou senha incorretos.'; return; }
+  sessionUser=data.user; mostrarApp();
+}
+async function sair(){ await supa.auth.signOut(); location.reload(); }
+
+function mostrarApp(){
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  renderTabs(); setPeriodo('mes');
+}
+
+// ---------- período ----------
+function setPeriodo(p){
+  periodo=p;
+  document.querySelectorAll('#periods span').forEach(s=>s.classList.toggle('on', s.dataset.p===p));
+  const now=new Date(2026,4,31); // referência maio/2026 (ajustar p/ data real depois)
+  const y=now.getFullYear(), m=now.getMonth();
+  const iso=d=>d.toISOString().slice(0,10);
+  if(p==='mes'){ dataDe=iso(new Date(y,m,1)); dataAte=iso(new Date(y,m+1,0)); }
+  if(p==='tri'){ dataDe=iso(new Date(y,m-2,1)); dataAte=iso(new Date(y,m+1,0)); }
+  if(p==='sem'){ dataDe=iso(new Date(y,m-5,1)); dataAte=iso(new Date(y,m+1,0)); }
+  if(p==='ano'){ dataDe=iso(new Date(y,0,1)); dataAte=iso(new Date(y,11,31)); }
+  if(p==='custom'){ /* abrir date pickers — simplificado por ora */ }
+  carregar();
+}
+function setRegime(r){
+  regime=r;
+  document.querySelectorAll('#regime-toggle span').forEach(s=>s.classList.toggle('on', s.dataset.r===r));
+  carregar();
+}
+
+// ---------- dados ----------
+async function carregar(){
+  loading=true; render();
+  try{
+    const url=`/api/contaazul/analytics?data_de=${dataDe}&data_ate=${dataAte}&regime=${regime}`;
+    const r=await fetch(url);
+    if(!r.ok){ throw new Error((await r.json()).error||'Erro'); }
+    analytics=await r.json();
+  }catch(e){
+    analytics={ erro:e.message };
+  }
+  loading=false; render();
+}
+
+// ---------- abas ----------
+const TABS=[
+  ['geral','Visão geral'],['dre','DRE'],['recdesp','Receitas e despesas'],
+  ['unidades','Unidades'],['orcamento','Orçamento'],
+  ['campeven','Campanhas e eventos'],['fluxo','Fluxo e patrimônio'],
+];
+function renderTabs(){
+  document.getElementById('tabs').innerHTML=TABS.map(([id,l])=>
+    `<button class="${id===activeTab?'on':''}" onclick="go('${id}')">${l}</button>`).join('');
+}
+function go(id){ activeTab=id; renderTabs(); render(); }
+
+// ---------- render ----------
+function bar(label,val,max,color){
+  const pct=Math.min(100,Math.abs(val)/(max||1)*100);
+  return `<div class="barrow"><div class="top"><span style="color:var(--text2)">${label}</span>
+    <span class="num">${fmt(val)}</span></div>
+    <div class="track"><div class="fill" style="width:${pct}%;background:${color}"></div></div></div>`;
+}
+
+function render(){
+  const scr=document.getElementById('screen');
+  if(loading){ scr.innerHTML='<div class="loading">Carregando dados da Conta Azul…</div>'; return; }
+  if(analytics && analytics.erro){
+    scr.innerHTML=`<div class="loading" style="color:var(--red)">
+      Não foi possível carregar: ${analytics.erro}<br><br>
+      <span style="color:var(--text2)">Se a conta ainda não foi conectada, isso é esperado — conecte o Conta Azul e recarregue.</span></div>`;
+    return;
+  }
+  if(!analytics){ scr.innerHTML='<div class="loading">Sem dados.</div>'; return; }
+  scr.innerHTML=(SCREENS[activeTab]||(()=>'<div class="loading">—</div>'))();
+}
+
+const SCREENS={
+  geral(){
+    const t=analytics.totais||{entradas:0,saidas:0,resultado:0};
+    const u=(analytics.unidades||[]).slice(0,6);
+    const maxU=Math.max(1,...u.map(x=>Math.abs(x.resultado)));
+    return `<div class="grid cards" style="margin-bottom:18px">
+      <div class="card"><div class="lbl">Entradas</div><div class="val" style="color:${COL.teal}">${fmt(t.entradas)}</div></div>
+      <div class="card"><div class="lbl">Saídas</div><div class="val" style="color:${COL.red}">${fmt(t.saidas)}</div></div>
+      <div class="card"><div class="lbl">Resultado</div><div class="val" style="color:${COL.blue}">${fmt(t.resultado)}</div></div>
+      <div class="card"><div class="lbl">Lançamentos</div><div class="val">${analytics.qtdLancamentos||0}</div></div>
+    </div>
+    <h3 style="font-size:13.5px;margin-bottom:10px">Resultado por unidade</h3>
+    <div class="panel">${u.map(x=>bar(x.nome,x.resultado,maxU,x.resultado>=0?COL.teal:COL.red)).join('')||'<div style="color:var(--text2)">Sem dados de unidade.</div>'}</div>`;
+  },
+
+  dre(){
+    const d=analytics.dre; if(!d) return '<div class="loading">Sem DRE.</div>';
+    const s=d.subtotais;
+    const view=window._dreView||'sint';
+    let rows=[];
+    rows.push(['RECEITA OPERACIONAL BRUTA', s.receitaOperacionalBruta, 'h']);
+    // grupos de receita operacional
+    for(const [grupo,info] of Object.entries(d.receitasPorGrupo)){
+      if(info.tipo!=='operacional') continue;
+      rows.push([grupo, info.total, 'i']);
+      if(view==='anal') for(const [cat,v] of Object.entries(info.categorias)) rows.push([cat, v, 'sub']);
+    }
+    rows.push(['(−) Deduções — taxas de cartão', -s.deducoes, 'i']);
+    if(view==='anal' && d.deducoes) for(const [cat,v] of Object.entries(d.deducoes.categorias)) rows.push([cat,-v,'sub']);
+    rows.push(['= RECEITA OPERACIONAL LÍQUIDA', s.receitaLiquida, 's']);
+    rows.push(['(−) DESPESAS OPERACIONAIS', -s.despesaTotal, 'h']);
+    for(const [grupo,info] of Object.entries(d.despesasPorGrupo)){
+      rows.push([grupo, -info.total, 'i']);
+      if(view==='anal') for(const [cat,v] of Object.entries(info.categorias)) rows.push([cat,-v,'sub']);
+    }
+    rows.push(['= RESULTADO OPERACIONAL', s.resultadoOperacional, 's']);
+    if(s.receitaNaoOperacional) rows.push(['(+) Rendimentos de aplicações', s.receitaNaoOperacional, 'i']);
+    rows.push(['= RESULTADO LÍQUIDO', s.resultadoLiquido, 'r']);
+
+    const body=rows.map(([l,v,t])=>{
+      let vc='var(--text)'; if(v<0&&(t==='i'||t==='sub'))vc=COL.red; if(t==='r')vc='var(--accent)';
+      return `<div class="dre-row ${t}"><span>${l}</span><span class="num" style="color:${vc}">${fmt(v)}</span></div>`;
+    }).join('');
+
+    const m=d.memoria||{};
+    return `<div class="topbar" style="margin-bottom:14px">
+      <div style="font-size:14px;font-weight:600">Demonstrativo de resultado</div>
+      <div class="toggle">
+        <span class="${view==='sint'?'on':''}" onclick="setDreView('sint')">Sintética</span>
+        <span class="${view==='anal'?'on':''}" onclick="setDreView('anal')">Analítica</span>
+      </div></div>
+      <div class="panel" style="padding:8px 4px">${body}</div>
+      <div class="panel" style="background:var(--surface0);margin-top:14px">
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">Memória de cálculo — fora do resultado</div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--text2)">
+          <span>Transferências: <b style="color:var(--text)">${fmt(m.transferencias)}</b></span>
+          <span>Empréstimos: <b style="color:var(--text)">${fmt(m.emprestimos)}</b></span>
+          <span>Mov. de caixa: <b style="color:var(--text)">${fmt(m.movimentoCaixa)}</b></span>
+        </div></div>`;
+  },
+
+  recdesp(){
+    const rd=analytics.receitasDespesas||{receitas:[],despesas:[]};
+    const r=rd.receitas.slice(0,10), d=rd.despesas.slice(0,10);
+    const maxr=Math.max(1,...r.map(x=>x.valor)), maxd=Math.max(1,...d.map(x=>x.valor));
+    return `<div class="filterbar">
+      <div class="search"><span style="color:var(--muted)">⌕</span><input placeholder="Buscar descrição…"></div>
+      <span class="chip">Unidade</span><span class="chip">Categoria</span></div>
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px">
+      <div><h3 style="color:${COL.teal}">Receitas por categoria</h3>
+        <div class="panel">${r.map(x=>bar(x.categoria,x.valor,maxr,COL.teal)).join('')||'—'}</div></div>
+      <div><h3 style="color:${COL.red}">Despesas por categoria</h3>
+        <div class="panel">${d.map(x=>bar(x.categoria,x.valor,maxd,COL.red)).join('')||'—'}</div></div>
+    </div>`;
+  },
+
+  unidades(){
+    const u=analytics.unidades||[];
+    const cols=[COL.teal,COL.blue,COL.violet,COL.amber,COL.green,COL.red,COL.orange];
+    return `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(195px,1fr))">
+      ${u.map((x,i)=>`<div class="unit-card">
+        <div class="name"><span class="dot" style="background:${cols[i%cols.length]}"></span>${x.nome}</div>
+        <div class="line"><span>Receita</span><span class="num">${fmtk(x.receita)}</span></div>
+        <div class="line"><span>Despesa</span><span class="num">${fmtk(x.despesa)}</span></div>
+        <div class="res"><span>Resultado</span><span class="num" style="color:${x.resultado>=0?COL.teal:COL.red}">${fmtk(x.resultado)}</span></div>
+      </div>`).join('')||'<div class="loading">Sem dados de unidade.</div>'}</div>`;
+  },
+
+  orcamento(){
+    return `<div class="subnav"><span class="on">Realizado vs meta</span>
+      <span>Evolução 2024-26</span><span>Folha de pessoal</span></div>
+    <p style="color:var(--text2);font-size:12.5px;margin-bottom:14px">
+      Realizado vem da API · as metas o cliente digita aqui. Salvas com segurança.</p>
+    <div class="panel" id="orc-list">Carregando metas…</div>`;
+  },
+
+  campeven(){
+    return `<div class="subnav"><span class="on">Campanhas</span><span>Eventos</span></div>
+    <div class="panel"><p style="color:var(--text2);font-size:12.5px">
+      Acompanhamento de campanhas (meta, % atingido, a receber) e eventos individuais.
+      As metas de campanha o cliente digita; o realizado vem da API por centro de custo.</p></div>`;
+  },
+
+  fluxo(){
+    return `<div class="subnav"><span class="on">Fluxo projetado</span>
+      <span>Créditos a receber</span><span>Investimentos a pagar</span><span>Movimentações</span></div>
+    <div class="panel"><p style="color:var(--text2);font-size:12.5px">
+      Fluxo de caixa projetado 30/60/90 dias a partir dos vencimentos reais,
+      créditos a receber (cartões/caução), investimentos parcelados e movimentações financeiras.</p></div>`;
+  },
+};
+
+window.setDreView=v=>{ window._dreView=v; render(); };
+window.go=go; window.setPeriodo=setPeriodo; window.setRegime=setRegime;
+window.entrar=entrar; window.sair=sair;
+
+boot();
+</script>
+</body>
+</html>
