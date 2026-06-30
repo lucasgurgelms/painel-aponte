@@ -78,6 +78,28 @@ export default async function handler(req, res) {
       });
     }
 
+    if (modo === 'statustest') {
+      const base = { pagina: 1, tamanho_pagina: 5, data_vencimento_de: '2026-01-01', data_vencimento_ate: '2027-12-31' };
+      const filtros = [
+        { nome: 'sem_filtro', extra: {} },
+        { nome: 'status=PENDING', extra: { status: 'PENDING' } },
+        { nome: 'status=EM_ABERTO', extra: { status: 'EM_ABERTO' } },
+        { nome: 'status_traduzido=EM_ABERTO', extra: { status_traduzido: 'EM_ABERTO' } },
+        { nome: 'situacao=EM_ABERTO', extra: { situacao: 'EM_ABERTO' } },
+        { nome: 'apenas_em_aberto=true', extra: { apenas_em_aberto: true } },
+        { nome: 'pago=false', extra: { pago: false } },
+        { nome: 'somente_nao_pagos=true', extra: { somente_nao_pagos: true } },
+      ];
+      const out = {};
+      for (const f of filtros) {
+        try {
+          const r = await buscarComFallback('/financeiro/eventos-financeiros/contas-a-receber/buscar', { ...base, ...f.extra });
+          out[f.nome] = { itens_totais: r?.itens_totais };
+        } catch (err) { out[f.nome] = { erro: String(err.message).slice(0, 80) }; }
+      }
+      return res.status(200).json({ obs: 'comparar itens_totais; o filtro certo reduz drasticamente vs sem_filtro', receber: out });
+    }
+
     if (modo === 'endpoints') {
       const candidatos = [
         '/financeiro/contas-financeiras',
