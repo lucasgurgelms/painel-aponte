@@ -603,7 +603,7 @@ const SCREENS={
         <span>Movimento de caixa: <b style="color:var(--text)">${fmt(mem.movimentoCaixa)}</b></span>
       </div></div>
       <div class="panel" style="margin-top:14px"><h3>Contas bancárias</h3>
-        <div style="font-size:12.5px;color:var(--text2)">${(fluxo.contas||[]).map(c=>`<div class="line" style="display:flex;justify-content:space-between;padding:4px 0"><span>${c.nome}</span><span style="color:var(--muted)">${c.banco||c.tipo||''}</span></div>`).join('')||'—'}</div>
+        <div style="font-size:12.5px;color:var(--text2)">${(fluxo.contas||[]).map(c=>`<div class="line" style="display:flex;justify-content:space-between;padding:4px 0"><span>${c.nome}</span><span style="color:var(--muted)">${(c.banco&&c.banco!=='NAO_BANCO')?c.banco:''}</span></div>`).join('')||'—'}</div>
         <p style="color:var(--muted);font-size:11px;margin-top:8px">A API v2 do Conta Azul não expõe o saldo por conta — apenas o cadastro.</p></div>`;
   },
 
