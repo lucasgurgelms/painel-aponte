@@ -107,6 +107,15 @@
   table.metas input { width:120px; padding:6px 8px; }
   .grid-2 { grid-template-columns:1fr 1fr; gap:14px; }
 
+  #modal { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex;
+    align-items:center; justify-content:center; padding:20px; z-index:50; }
+  .modal-card { background:var(--surface); border:0.5px solid var(--border);
+    border-radius:14px; width:100%; max-width:680px; max-height:85vh; display:flex; flex-direction:column; }
+  .modal-head { display:flex; justify-content:space-between; align-items:center;
+    padding:14px 18px; border-bottom:0.5px solid var(--border); font-weight:600; font-size:14px; }
+  .modal-x { cursor:pointer; color:var(--text2); }
+  #modal-body { padding:14px 18px; overflow:auto; }
+
   /* ---- Responsivo (celular). Só afeta telas estreitas; desktop intacto. ---- */
   @media (max-width:640px) {
     #app { padding:12px; }
@@ -176,6 +185,13 @@
 
   <div class="tabs" id="tabs"></div>
   <div id="screen"><div class="loading">Carregando…</div></div>
+
+  <div id="modal" class="hidden" onclick="if(event.target.id==='modal')fecharModal()">
+    <div class="modal-card">
+      <div class="modal-head"><span id="modal-title"></span><span class="modal-x" onclick="fecharModal()">✕</span></div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -440,7 +456,8 @@ const SCREENS={
 
     const body=rows.map(([l,v,t])=>{
       let vc='var(--text)'; if(v<0&&(t==='i'||t==='sub'))vc=COL.red; if(t==='r')vc='var(--accent)';
-      return `<div class="dre-row ${t}"><span>${l}</span><span class="num" style="color:${vc}">${fmt(v)}</span></div>`;
+      const cli = t==='sub' ? ` data-cat="${String(l).replace(/"/g,'&quot;')}" onclick="verRazao(this.dataset.cat)" style="cursor:pointer" title="Ver lançamentos"` : '';
+      return `<div class="dre-row ${t}"${cli}><span>${l}${t==='sub'?' <span style="color:var(--muted);font-size:10px">›</span>':''}</span><span class="num" style="color:${vc}">${fmt(v)}</span></div>`;
     }).join('');
 
     const m=d.memoria||{};
@@ -678,6 +695,28 @@ window.filtrarRD=()=>{
 };
 window.setRdFiltro=(v)=>{ window._rdFiltro=v; render(); };
 window.aplicarCustom=aplicarCustom;
+
+// Modal de drill-down ("razão" de uma categoria).
+function abrirModal(titulo,html){
+  document.getElementById('modal-title').textContent=titulo;
+  document.getElementById('modal-body').innerHTML=html;
+  document.getElementById('modal').classList.remove('hidden');
+}
+function setModalBody(html){ document.getElementById('modal-body').innerHTML=html; }
+window.fecharModal=()=>document.getElementById('modal').classList.add('hidden');
+window.verRazao=async(cat)=>{
+  abrirModal(`Lançamentos · ${cat}`, '<div class="loading">Carregando lançamentos…</div>');
+  try{
+    const url=`/api/contaazul/lancamentos?data_de=${dataDe}&data_ate=${dataAte}&regime=${regime}&categoria=${encodeURIComponent(cat)}`;
+    const d=await fetch(url,{ headers: await authHeaders() }).then(r=>r.json());
+    if(d.error){ setModalBody(`<div style="color:var(--red)">${d.error}</div>`); return; }
+    const linhas=(d.itens||[]).map(i=>`<div class="dre-row i" style="cursor:default">
+      <span>${String(i.data||'').slice(0,10)} · ${i.descricao||'—'}${i.centro?` · <span style="color:var(--muted)">${i.centro}</span>`:''}</span>
+      <span class="num">${fmt(i.valor)}</span></div>`).join('');
+    setModalBody(`<div style="color:var(--text2);font-size:12.5px;margin-bottom:8px">${d.qtd} lançamento(s) · total <b style="color:var(--text)">${fmt(d.total)}</b></div>
+      <div class="panel" style="padding:6px 4px">${linhas||'<div style="color:var(--text2);padding:10px">Sem lançamentos no período.</div>'}</div>`);
+  }catch(e){ setModalBody(`<div style="color:var(--red)">${e.message}</div>`); }
+};
 
 window.setDreView=v=>{ window._dreView=v; render(); };
 window.go=go; window.setPeriodo=setPeriodo; window.setRegime=setRegime;
