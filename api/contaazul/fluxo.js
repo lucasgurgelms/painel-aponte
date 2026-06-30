@@ -9,19 +9,17 @@ import { norm, foraDaDRE, unidadeDoCentroCusto } from '../../lib/dre-config.js';
 
 const DIA = 86400000;
 
-// Busca paginada por data de vencimento, com cap de segurança (evita estourar
-// os 30s da função). Retorna { itens, truncado }.
-async function buscar(tipo, de, ate, maxPag = 20) {
+// Busca paginada SÓ dos itens em aberto (status=EM_ABERTO filtra na API — passa
+// de milhares para ~centenas, evitando o timeout de 30s da função).
+async function buscar(tipo, de, ate, maxPag = 15) {
   const path = `/financeiro/eventos-financeiros/${tipo}/buscar`;
   const itens = [];
   let pagina = 1, total = 0;
   while (pagina <= maxPag) {
+    const params = { pagina, tamanho_pagina: 100, data_vencimento_de: de, data_vencimento_ate: ate, status: 'EM_ABERTO' };
     let resp;
-    try {
-      resp = await caFetch(path, { method: 'GET', query: { pagina, tamanho_pagina: 100, data_vencimento_de: de, data_vencimento_ate: ate } });
-    } catch (_) {
-      resp = await caFetch(path, { method: 'POST', body: { pagina, tamanho_pagina: 100, data_vencimento_de: de, data_vencimento_ate: ate } });
-    }
+    try { resp = await caFetch(path, { method: 'GET', query: params }); }
+    catch (_) { resp = await caFetch(path, { method: 'POST', body: params }); }
     const lote = (resp && (resp.itens || resp.content || resp.data)) || [];
     itens.push(...lote);
     total = Number(resp?.itens_totais ?? itens.length);
