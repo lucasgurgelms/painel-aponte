@@ -29,6 +29,7 @@ export default async function handler(req, res) {
 
     const payload = {
       periodo: { data_de, data_ate, regime },
+      sincronizadoEm: new Date().toISOString(), // instante da busca ao vivo na Conta Azul
       totais: montarTotais(lancamentos),
       dre: montarDRE(lancamentos),
       unidades: montarUnidades(lancamentos),

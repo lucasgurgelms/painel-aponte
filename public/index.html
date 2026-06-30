@@ -105,6 +105,25 @@
   table.metas { width:100%; border-collapse:collapse; font-size:13px; }
   table.metas td { padding:9px 6px; border-bottom:0.5px solid var(--border); }
   table.metas input { width:120px; padding:6px 8px; }
+  .grid-2 { grid-template-columns:1fr 1fr; gap:14px; }
+
+  /* ---- Responsivo (celular). Só afeta telas estreitas; desktop intacto. ---- */
+  @media (max-width:640px) {
+    #app { padding:12px; }
+    .topbar h2 { font-size:16px; }
+    .topbar .sub { font-size:11px; }
+    /* período e abas viram rolagem horizontal em vez de quebrar em várias linhas */
+    .periods, .tabs { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+    .periods::-webkit-scrollbar, .tabs::-webkit-scrollbar { display:none; }
+    .periods span, .tabs button { white-space:nowrap; flex:0 0 auto; }
+    .card .val { font-size:18px; }
+    .grid-2 { grid-template-columns:1fr; }           /* receitas/despesas: 1 coluna */
+    .panel { overflow-x:auto; }                       /* tabelas largas rolam, não estouram */
+    .dre-row { font-size:12px; padding:7px 10px; }
+    .dre-row.sub { padding-left:22px; }
+    table.metas input { width:100%; min-width:90px; }
+    .filterbar .search { min-width:100%; }
+  }
 </style>
 </head>
 <body>
@@ -170,6 +189,7 @@ async function authHeaders(){
 
 const fmt = n => (n<0?'-':'')+'R$ '+Math.abs(Math.round(n||0)).toLocaleString('pt-BR');
 const fmtk = n => (n<0?'-':'')+'R$ '+(Math.abs(n||0)/1000).toFixed(1).replace('.',',')+'k';
+const fmtDataHora = iso => { try{ return new Date(iso).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(_){ return ''; } };
 const COL = { teal:'#1baf7a', red:'#e34948', amber:'#eda100', blue:'#3987e5',
   violet:'#9085e9', green:'#3b9c3b', orange:'#eb6834' };
 
@@ -259,6 +279,8 @@ async function carregar(){
     const r=await fetch(url, { headers: await authHeaders() });
     if(!r.ok){ throw new Error((await r.json()).error||'Erro'); }
     analytics=await r.json();
+    const cs=document.getElementById('conn-status');
+    if(cs && analytics.sincronizadoEm) cs.textContent=`Conta Azul · sincronizado em ${fmtDataHora(analytics.sincronizadoEm)}`;
   }catch(e){
     analytics={ erro:e.message };
   }
@@ -424,7 +446,7 @@ const SCREENS={
     return `<div class="filterbar">
       <div class="search"><span style="color:var(--muted)">⌕</span><input placeholder="Buscar descrição…"></div>
       <span class="chip">Unidade</span><span class="chip">Categoria</span></div>
-    <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px">
+    <div class="grid grid-2">
       <div><h3 style="color:${COL.teal}">Receitas por categoria</h3>
         <div class="panel">${r.map(x=>bar(x.categoria,x.valor,maxr,COL.teal)).join('')||'—'}</div></div>
       <div><h3 style="color:${COL.red}">Despesas por categoria</h3>
