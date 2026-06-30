@@ -156,7 +156,11 @@
 let supa, sessionUser=null;
 let regime='caixa', periodo='mes';
 let dataDe='2026-05-01', dataAte='2026-05-31';
-let analytics=null, metas={}, activeTab='geral', loading=false;
+let analytics=null, activeTab='geral', loading=false;
+let fluxo=null, fluxoLoading=false;
+let metasByTipo={}; // { orcamento:{chave:valor}, campanha:{...} }
+let papel=null, podeEditar=true; // definidos após login (papéis de usuário)
+let subview={}; // sub-aba ativa por tela
 
 const fmt = n => (n<0?'-':'')+'R$ '+Math.abs(Math.round(n||0)).toLocaleString('pt-BR');
 const fmtk = n => (n<0?'-':'')+'R$ '+(Math.abs(n||0)/1000).toFixed(1).replace('.',',')+'k';
@@ -220,6 +224,31 @@ async function carregar(){
   loading=false; render();
 }
 
+// Carrega itens em aberto / fluxo (lazy — só quando uma aba que usa precisa).
+async function carregarFluxo(){
+  if(fluxo||fluxoLoading) return;
+  fluxoLoading=true; render();
+  try{ fluxo=await fetch('/api/contaazul/fluxo?dias=365').then(r=>r.json()); }
+  catch(e){ fluxo={ erro:e.message }; }
+  fluxoLoading=false; render();
+}
+// Carrega metas de um tipo (orcamento|campanha) e indexa por chave.
+async function carregarMetas(tipo){
+  if(metasByTipo[tipo]) return;
+  try{
+    const arr=await fetch(`/api/metas?tipo=${tipo}`).then(r=>r.json());
+    const m={}; (arr||[]).forEach(x=>{ m[x.chave]=Number(x.valor)||0; });
+    metasByTipo[tipo]=m;
+  }catch(_){ metasByTipo[tipo]={}; }
+  render();
+}
+async function salvarMeta(tipo,chave,valor){
+  const ano=Number((dataDe||'2026').slice(0,4))||2026;
+  await fetch('/api/metas',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ tipo, chave, valor:Number(valor)||0, ano })});
+  (metasByTipo[tipo]=metasByTipo[tipo]||{})[chave]=Number(valor)||0;
+}
+
 // ---------- abas ----------
 const TABS=[
   ['geral','Visão geral'],['dre','DRE'],['recdesp','Receitas e despesas'],
@@ -230,7 +259,13 @@ function renderTabs(){
   document.getElementById('tabs').innerHTML=TABS.map(([id,l])=>
     `<button class="${id===activeTab?'on':''}" onclick="go('${id}')">${l}</button>`).join('');
 }
-function go(id){ activeTab=id; renderTabs(); render(); }
+function go(id){
+  activeTab=id; renderTabs(); render();
+  if(id==='orcamento'){ carregarMetas('orcamento'); }
+  if(id==='campeven'){ carregarMetas('campanha'); carregarFluxo(); }
+  if(id==='fluxo'){ carregarFluxo(); }
+}
+function setSub(tela,v){ subview[tela]=v; render(); }
 
 // ---------- render ----------
 function bar(label,val,max,color){
@@ -342,28 +377,155 @@ const SCREENS={
   },
 
   orcamento(){
-    return `<div class="subnav"><span class="on">Realizado vs meta</span>
-      <span>Evolução 2024-26</span><span>Folha de pessoal</span></div>
-    <p style="color:var(--text2);font-size:12.5px;margin-bottom:14px">
-      Realizado vem da API · as metas o cliente digita aqui. Salvas com segurança.</p>
-    <div class="panel" id="orc-list">Carregando metas…</div>`;
+    const sv=subview.orc||'meta';
+    const d=analytics.dre; if(!d) return '<div class="loading">Sem dados.</div>';
+    const subnav=`<div class="subnav">
+      <span class="${sv==='meta'?'on':''}" onclick="setSub('orc','meta')">Realizado vs meta</span>
+      <span class="${sv==='folha'?'on':''}" onclick="setSub('orc','folha')">Folha de pessoal</span></div>`;
+
+    if(sv==='folha'){
+      const pessoal=(d.despesasPorGrupo['Pessoal']||{categorias:{}}).categorias;
+      const rows=Object.entries(pessoal).sort((a,b)=>b[1]-a[1]);
+      const max=Math.max(1,...rows.map(r=>r[1]));
+      return subnav+`<div class="panel">${rows.map(([c,v])=>bar(c,v,max,COL.violet)).join('')||'Sem despesas de pessoal no período.'}</div>`;
+    }
+
+    const metas=metasByTipo.orcamento;
+    if(!metas) return subnav+'<div class="loading">Carregando metas…</div>';
+    const editing=window._orcEdit;
+    const grupos=Object.keys(d.despesasPorGrupo);
+    if(editing){
+      const linhas=grupos.map(g=>`<tr><td>${g}</td><td class="num">${fmt(d.despesasPorGrupo[g].total)}</td>
+        <td><input type="number" value="${metas[g]||0}" data-g="${g}"></td></tr>`).join('');
+      return subnav+`<div class="panel"><table class="metas">
+        <tr><td style="color:var(--text2)">Grupo de despesa</td><td style="color:var(--text2)">Realizado</td><td style="color:var(--text2)">Meta (R$/período)</td></tr>
+        ${linhas}</table><div style="margin-top:12px"><button class="btn btn-ghost" onclick="salvarOrc()">Salvar metas</button></div></div>`;
+    }
+    const linhas=grupos.map(g=>{
+      const real=d.despesasPorGrupo[g].total, meta=metas[g]||0;
+      const pct=meta>0?real/meta*100:0;
+      const cor=meta===0?COL.blue:(pct<80?COL.teal:(pct<=100?COL.amber:COL.red));
+      const dir=meta?`${fmt(real)} / ${fmt(meta)} <b style="color:${cor}">${Math.round(pct)}%</b>`:`${fmt(real)} <span style="color:var(--muted)">sem meta</span>`;
+      return `<div class="barrow"><div class="top"><span style="color:var(--text2)">${g}</span><span class="num">${dir}</span></div>
+        <div class="track"><div class="fill" style="width:${Math.min(100,pct)}%;background:${cor}"></div></div></div>`;
+    }).join('');
+    const botao=podeEditar?`<button class="btn btn-ghost" onclick="window._orcEdit=true;render()">Editar metas</button>`:'';
+    return subnav+`<div style="display:flex;justify-content:flex-end;margin-bottom:10px">${botao}</div>
+      <div class="panel">${linhas}</div>
+      <p style="color:var(--muted);font-size:11.5px;margin-top:10px">Semáforo: verde abaixo de 80% da meta · amarelo 80–100% · vermelho acima da meta.</p>`;
   },
 
   campeven(){
-    return `<div class="subnav"><span class="on">Campanhas</span><span>Eventos</span></div>
-    <div class="panel"><p style="color:var(--text2);font-size:12.5px">
-      Acompanhamento de campanhas (meta, % atingido, a receber) e eventos individuais.
-      As metas de campanha o cliente digita; o realizado vem da API por centro de custo.</p></div>`;
+    const sv=subview.camp||'campanhas';
+    const subnav=`<div class="subnav">
+      <span class="${sv==='campanhas'?'on':''}" onclick="setSub('camp','campanhas')">Campanhas</span>
+      <span class="${sv==='eventos'?'on':''}" onclick="setSub('camp','eventos')">Eventos</span></div>`;
+    const uni=Object.fromEntries((analytics.unidades||[]).map(u=>[u.nome,u]));
+    const aRec=Object.fromEntries(((fluxo&&fluxo.aReceber&&fluxo.aReceber.porCentro)||[]).map(x=>[x.unidade,x.valor]));
+    const itensDe=key=>((fluxo&&fluxo.aReceber&&fluxo.aReceber.itens)||[]).filter(i=>(i.centro||'').toUpperCase().includes(key));
+
+    if(sv==='eventos'){
+      const u=uni['Eventos']||{receita:0,despesa:0,resultado:0};
+      return subnav+cardCentro('Eventos',u,aRec['Eventos']||0)+listaAberto('A receber de eventos',itensDe('EVENTO'));
+    }
+    const u=uni['Campanha']||{receita:0,despesa:0,resultado:0};
+    const metas=metasByTipo.campanha||{}; const meta=metas['Campanha']||0;
+    const pct=meta>0?u.receita/meta*100:0;
+    const cor=meta===0?COL.blue:(pct>=100?COL.teal:(pct>=80?COL.amber:COL.red));
+    const editing=window._campEdit;
+    const metaBox=editing
+      ? `<div style="margin-top:12px">Meta: <input type="number" id="campMeta" value="${meta}" style="width:130px"> <button class="btn btn-ghost" onclick="salvarCamp()">Salvar</button></div>`
+      : (podeEditar?`<button class="btn btn-ghost" style="margin-top:12px" onclick="window._campEdit=true;render()">${meta?'Editar meta':'Definir meta'}</button>`:'');
+    const barra=meta?`<div class="barrow"><div class="top"><span style="color:var(--text2)">Arrecadado vs meta</span>
+        <span class="num">${fmt(u.receita)} / ${fmt(meta)} <b style="color:${cor}">${Math.round(pct)}%</b></span></div>
+        <div class="track"><div class="fill" style="width:${Math.min(100,pct)}%;background:${cor}"></div></div></div>`:'';
+    return subnav+`<div class="panel"><h3>Campanha</h3>${barra}
+      <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:8px;font-size:12.5px;color:var(--text2)">
+        <span>Arrecadado: <b style="color:${COL.teal}">${fmt(u.receita)}</b></span>
+        <span>Gasto: <b style="color:${COL.red}">${fmt(u.despesa)}</b></span>
+        <span>Resultado: <b>${fmt(u.resultado)}</b></span>
+        <span>A receber (futuro): <b style="color:${COL.amber}">${fmt(aRec['Campanha']||0)}</b></span>
+      </div>${metaBox}</div>`+listaAberto('Parcelas a receber da campanha',itensDe('CAMPANHA'));
   },
 
   fluxo(){
-    return `<div class="subnav"><span class="on">Fluxo projetado</span>
-      <span>Créditos a receber</span><span>Investimentos a pagar</span><span>Movimentações</span></div>
-    <div class="panel"><p style="color:var(--text2);font-size:12.5px">
-      Fluxo de caixa projetado 30/60/90 dias a partir dos vencimentos reais,
-      créditos a receber (cartões/caução), investimentos parcelados e movimentações financeiras.</p></div>`;
+    const sv=subview.flx||'proj';
+    const subnav=`<div class="subnav">
+      <span class="${sv==='proj'?'on':''}" onclick="setSub('flx','proj')">Fluxo projetado</span>
+      <span class="${sv==='rec'?'on':''}" onclick="setSub('flx','rec')">Créditos a receber</span>
+      <span class="${sv==='pag'?'on':''}" onclick="setSub('flx','pag')">A pagar</span>
+      <span class="${sv==='mov'?'on':''}" onclick="setSub('flx','mov')">Movimentações</span></div>`;
+    if(fluxoLoading||!fluxo) return subnav+'<div class="loading">Carregando fluxo em aberto…</div>';
+    if(fluxo.erro) return subnav+`<div class="loading" style="color:var(--red)">Erro: ${fluxo.erro}</div>`;
+    const p=fluxo.projecao;
+
+    if(sv==='proj'){
+      const linha=(lbl,r,pg)=>`<div class="dre-row i" style="cursor:default">
+        <span style="flex:2">${lbl}</span>
+        <span class="num" style="flex:1;text-align:right;color:${COL.teal}">${fmt(r)}</span>
+        <span class="num" style="flex:1;text-align:right;color:${COL.red}">-${fmt(pg).replace('-','')}</span>
+        <span class="num" style="flex:1;text-align:right;color:${(r-pg)>=0?COL.teal:COL.red}">${fmt(r-pg)}</span></div>`;
+      return subnav+`<div class="grid cards" style="margin-bottom:16px">
+        <div class="card"><div class="lbl">Saldo proj. 30 dias</div><div class="val" style="color:${(p.receber.d30-p.pagar.d30)>=0?COL.teal:COL.red}">${fmt(p.receber.d30-p.pagar.d30)}</div></div>
+        <div class="card"><div class="lbl">60 dias</div><div class="val" style="color:${(p.receber.d60-p.pagar.d60)>=0?COL.teal:COL.red}">${fmt(p.receber.d60-p.pagar.d60)}</div></div>
+        <div class="card"><div class="lbl">90 dias</div><div class="val" style="color:${(p.receber.d90-p.pagar.d90)>=0?COL.teal:COL.red}">${fmt(p.receber.d90-p.pagar.d90)}</div></div>
+      </div>
+      <div class="panel" style="padding:8px 4px">
+        <div class="dre-row h"><span style="flex:2">Janela (a partir de hoje)</span><span style="flex:1;text-align:right">A receber</span><span style="flex:1;text-align:right">A pagar</span><span style="flex:1;text-align:right">Saldo</span></div>
+        ${linha('Vencido (ainda em aberto)',p.receber.vencido,p.pagar.vencido)}
+        ${linha('Próximos 30 dias',p.receber.d30,p.pagar.d30)}
+        ${linha('31–60 dias',p.receber.d60,p.pagar.d60)}
+        ${linha('61–90 dias',p.receber.d90,p.pagar.d90)}
+        ${linha('Além de 90 dias',p.receber.futuro,p.pagar.futuro)}
+      </div>`;
+    }
+    if(sv==='rec'){
+      const m=fluxo.aReceber.porMes, max=Math.max(1,...m.map(x=>x.valor));
+      return subnav+`<div class="panel">${m.map(x=>bar(x.mes,x.valor,max,COL.teal)).join('')||'Nada a receber em aberto.'}</div>
+        ${listaAberto('Itens a receber em aberto',fluxo.aReceber.itens)}`;
+    }
+    if(sv==='pag'){
+      const m=fluxo.aPagar.porMes, max=Math.max(1,...m.map(x=>x.valor));
+      return subnav+`<div class="panel">${m.map(x=>bar(x.mes,x.valor,max,COL.red)).join('')||'Nada a pagar em aberto.'}</div>
+        ${listaAberto('Itens a pagar em aberto',fluxo.aPagar.itens)}`;
+    }
+    const mem=(analytics.dre&&analytics.dre.memoria)||{transferencias:0,emprestimos:0,movimentoCaixa:0};
+    return subnav+`<div class="panel"><h3>Movimentações financeiras (fora da DRE)</h3>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:13px;color:var(--text2)">
+        <span>Transferências: <b style="color:var(--text)">${fmt(mem.transferencias)}</b></span>
+        <span>Empréstimos: <b style="color:var(--text)">${fmt(mem.emprestimos)}</b></span>
+        <span>Movimento de caixa: <b style="color:var(--text)">${fmt(mem.movimentoCaixa)}</b></span>
+      </div></div>
+      <div class="panel" style="margin-top:14px"><h3>Contas bancárias</h3>
+        <div style="font-size:12.5px;color:var(--text2)">${(fluxo.contas||[]).map(c=>`<div class="line" style="display:flex;justify-content:space-between;padding:4px 0"><span>${c.nome}</span><span style="color:var(--muted)">${c.banco||c.tipo||''}</span></div>`).join('')||'—'}</div>
+        <p style="color:var(--muted);font-size:11px;margin-top:8px">A API v2 do Conta Azul não expõe o saldo por conta — apenas o cadastro.</p></div>`;
   },
 };
+
+// Helpers das telas de campanha/eventos.
+function cardCentro(nome,u,fut){
+  return `<div class="panel"><h3>${nome}</h3>
+    <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:12.5px;color:var(--text2)">
+      <span>Arrecadado: <b style="color:${COL.teal}">${fmt(u.receita)}</b></span>
+      <span>Gasto: <b style="color:${COL.red}">${fmt(u.despesa)}</b></span>
+      <span>Resultado: <b>${fmt(u.resultado)}</b></span>
+      <span>A receber (futuro): <b style="color:${COL.amber}">${fmt(fut)}</b></span></div></div>`;
+}
+function listaAberto(titulo,itens){
+  if(!fluxo) return `<div class="panel" style="margin-top:14px">Carregando itens em aberto…</div>`;
+  if(!itens||!itens.length) return `<div class="panel" style="margin-top:14px"><h3>${titulo}</h3><div style="color:var(--text2)">Nenhum item em aberto.</div></div>`;
+  const rows=itens.slice(0,40).map(i=>`<div class="dre-row i" style="cursor:default"><span>${(i.vencimento||'').slice(0,10)} · ${i.descricao}</span><span class="num">${fmt(i.nao_pago)}</span></div>`).join('');
+  return `<div class="panel" style="margin-top:14px;padding:8px 4px"><div style="padding:6px 14px;font-weight:600">${titulo} (${itens.length})</div>${rows}</div>`;
+}
+window.salvarOrc=async()=>{
+  for(const inp of document.querySelectorAll('#screen input[data-g]')) await salvarMeta('orcamento',inp.dataset.g,inp.value);
+  window._orcEdit=false; render();
+};
+window.salvarCamp=async()=>{
+  const v=document.getElementById('campMeta'); if(v) await salvarMeta('campanha','Campanha',v.value);
+  window._campEdit=false; render();
+};
+window.setSub=setSub;
 
 window.setDreView=v=>{ window._dreView=v; render(); };
 window.go=go; window.setPeriodo=setPeriodo; window.setRegime=setRegime;
