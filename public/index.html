@@ -201,6 +201,7 @@ let regime='caixa', periodo='mes';
 let dataDe='2026-05-01', dataAte='2026-05-31';
 let analytics=null, activeTab='geral', loading=false;
 let fluxo=null, fluxoLoading=false;
+let eventosDetalhe=null, evolucaoData=null; // dependem do período → resetam em carregar()
 let metasByTipo={}; // { orcamento:{chave:valor}, campanha:{...} }
 let papel=null, podeEditar=true; // definidos após login (papéis de usuário)
 let usuarios=null; // lista de perfis (aba admin)
@@ -310,6 +311,7 @@ function setRegime(r){
 
 // ---------- dados ----------
 async function carregar(){
+  eventosDetalhe=null; evolucaoData=null; // dependem do período/regime
   loading=true; render();
   try{
     const url=`/api/contaazul/analytics?data_de=${dataDe}&data_ate=${dataAte}&regime=${regime}`;
@@ -331,6 +333,42 @@ async function carregarFluxo(){
   try{ fluxo=await fetch('/api/contaazul/fluxo?dias=365',{ headers: await authHeaders() }).then(r=>r.json()); }
   catch(e){ fluxo={ erro:e.message }; }
   fluxoLoading=false; render();
+}
+// Normaliza a descrição num nome de evento (junta parcelas: "1/3 - X 1/3" → "X").
+function nomeEvento(desc){
+  return (desc||'').toString()
+    .replace(/^\s*\d+\/\d+\s*-\s*/,'')
+    .replace(/\s*-\s*complemento.*/i,'')
+    .replace(/\s*\d+\/\d+\s*$/,'')
+    .trim() || '—';
+}
+// Lançamentos do centro "Eventos" no período, agrupados por evento.
+async function carregarEventos(){
+  if(eventosDetalhe) return;
+  eventosDetalhe='carregando'; render();
+  try{
+    const url=`/api/contaazul/lancamentos?data_de=${dataDe}&data_ate=${dataAte}&regime=${regime}&centro=EVENTOS`;
+    const d=await fetch(url,{ headers: await authHeaders() }).then(r=>r.json());
+    const mapa={};
+    (d.itens||[]).forEach(i=>{
+      const k=nomeEvento(i.descricao);
+      if(!mapa[k]) mapa[k]={ nome:k, entrada:0, saida:0 };
+      if(i.credito) mapa[k].entrada+=i.valor; else mapa[k].saida+=i.valor;
+    });
+    eventosDetalhe=Object.values(mapa).map(e=>({ ...e, resultado:e.entrada-e.saida }))
+      .sort((a,b)=>(b.entrada+b.saida)-(a.entrada+a.saida));
+  }catch(e){ eventosDetalhe={ erro:e.message }; }
+  render();
+}
+// Evolução mês a mês do ano selecionado.
+async function carregarEvolucao(){
+  if(evolucaoData) return;
+  evolucaoData='carregando'; render();
+  try{
+    const ano=(dataDe||'2026').slice(0,4);
+    evolucaoData=await fetch(`/api/contaazul/evolucao?ano=${ano}&regime=${regime}`,{ headers: await authHeaders() }).then(r=>r.json());
+  }catch(e){ evolucaoData={ erro:e.message }; }
+  render();
 }
 // Carrega metas de um tipo (orcamento|campanha) e indexa por chave.
 async function carregarMetas(tipo){
@@ -367,7 +405,11 @@ function go(id){
   if(id==='fluxo'){ carregarFluxo(); }
   if(id==='usuarios'){ carregarUsuarios(); }
 }
-function setSub(tela,v){ subview[tela]=v; render(); }
+function setSub(tela,v){
+  subview[tela]=v; render();
+  if(tela==='camp'&&v==='eventos') carregarEventos();
+  if(tela==='orc'&&v==='evolucao') carregarEvolucao();
+}
 
 // ---------- usuários (admin) ----------
 async function carregarUsuarios(){
@@ -512,7 +554,19 @@ const SCREENS={
     const d=analytics.dre; if(!d) return '<div class="loading">Sem dados.</div>';
     const subnav=`<div class="subnav">
       <span class="${sv==='meta'?'on':''}" onclick="setSub('orc','meta')">Realizado vs meta</span>
+      <span class="${sv==='evolucao'?'on':''}" onclick="setSub('orc','evolucao')">Evolução</span>
       <span class="${sv==='folha'?'on':''}" onclick="setSub('orc','folha')">Folha de pessoal</span></div>`;
+
+    if(sv==='evolucao'){
+      const e=evolucaoData;
+      if(!e || e==='carregando') return subnav+'<div class="loading">Carregando evolução…</div>';
+      if(e.erro) return subnav+`<div class="loading" style="color:var(--red)">${e.erro}</div>`;
+      const serie=(e.serie||[]).filter(x=>x.entradas||x.saidas);
+      if(!serie.length) return subnav+'<div class="panel"><div style="color:var(--text2)">Sem movimento no ano.</div></div>';
+      const max=Math.max(1,...serie.map(x=>Math.abs(x.resultado)));
+      return subnav+`<p style="color:var(--text2);font-size:12.5px;margin-bottom:12px">Resultado por mês em ${e.ano} (entradas − saídas).</p>
+        <div class="panel">${serie.map(x=>bar(`${x.mes}`,x.resultado,max,x.resultado>=0?COL.teal:COL.red)).join('')}</div>`;
+    }
 
     if(sv==='folha'){
       const pessoal=(d.despesasPorGrupo['Pessoal']||{categorias:{}}).categorias;
@@ -557,7 +611,17 @@ const SCREENS={
 
     if(sv==='eventos'){
       const u=uni['Eventos']||{receita:0,despesa:0,resultado:0};
-      return subnav+cardCentro('Eventos',u,aRec['Eventos']||0)+listaAberto('A receber de eventos',itensDe('EVENTO'));
+      let detalhe;
+      if(!eventosDetalhe || eventosDetalhe==='carregando') detalhe='<div class="panel" style="margin-top:14px">Carregando eventos…</div>';
+      else if(eventosDetalhe.erro) detalhe=`<div class="panel" style="margin-top:14px;color:var(--red)">${eventosDetalhe.erro}</div>`;
+      else if(!eventosDetalhe.length) detalhe='<div class="panel" style="margin-top:14px"><div style="color:var(--text2)">Nenhum lançamento de evento no período.</div></div>';
+      else detalhe=`<h3 style="margin-top:16px">Por evento</h3><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">${eventosDetalhe.map(e=>`<div class="unit-card">
+        <div class="name">${e.nome}</div>
+        <div class="line"><span>Entrada</span><span class="num" style="color:${COL.teal}">${fmtk(e.entrada)}</span></div>
+        <div class="line"><span>Saída</span><span class="num" style="color:${COL.red}">${fmtk(e.saida)}</span></div>
+        <div class="res"><span>Resultado</span><span class="num" style="color:${e.resultado>=0?COL.teal:COL.red}">${fmtk(e.resultado)}</span></div>
+      </div>`).join('')}</div>`;
+      return subnav+cardCentro('Eventos (total)',u,aRec['Eventos']||0)+detalhe;
     }
     const u=uni['Campanha']||{receita:0,despesa:0,resultado:0};
     const metas=metasByTipo.campanha||{}; const meta=metas['Campanha']||0;
@@ -576,7 +640,7 @@ const SCREENS={
         <span>Gasto: <b style="color:${COL.red}">${fmt(u.despesa)}</b></span>
         <span>Resultado: <b>${fmt(u.resultado)}</b></span>
         <span>A receber (futuro): <b style="color:${COL.amber}">${fmt(aRec['Campanha']||0)}</b></span>
-      </div>${metaBox}</div>`+listaAberto('Parcelas a receber da campanha',itensDe('CAMPANHA'));
+      </div>${metaBox}</div>`+painelPorMes('A receber por mês',itensDe('CAMPANHA'))+listaAberto('Parcelas a receber da campanha',itensDe('CAMPANHA'));
   },
 
   fluxo(){
@@ -667,6 +731,14 @@ function cardCentro(nome,u,fut){
       <span>Gasto: <b style="color:${COL.red}">${fmt(u.despesa)}</b></span>
       <span>Resultado: <b>${fmt(u.resultado)}</b></span>
       <span>A receber (futuro): <b style="color:${COL.amber}">${fmt(fut)}</b></span></div></div>`;
+}
+function painelPorMes(titulo,itens){
+  const m={};
+  (itens||[]).forEach(i=>{ const k=(i.vencimento||'').slice(0,7); if(k) m[k]=(m[k]||0)+(i.nao_pago||0); });
+  const arr=Object.entries(m).map(([mes,valor])=>({mes,valor})).sort((a,b)=>a.mes.localeCompare(b.mes));
+  if(!arr.length) return '';
+  const max=Math.max(1,...arr.map(x=>x.valor));
+  return `<div class="panel" style="margin-top:14px"><h3>${titulo}</h3>${arr.map(x=>bar(x.mes,x.valor,max,COL.amber)).join('')}</div>`;
 }
 function listaAberto(titulo,itens){
   if(!fluxo) return `<div class="panel" style="margin-top:14px">Carregando itens em aberto…</div>`;

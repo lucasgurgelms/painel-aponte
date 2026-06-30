@@ -9,7 +9,7 @@ import { exigirLogin } from '../../lib/auth.js';
 export default async function handler(req, res) {
   try {
     if (!await exigirLogin(req, res)) return;
-    const { data_de, data_ate, regime = 'caixa', categoria, categorias } = req.query;
+    const { data_de, data_ate, regime = 'caixa', categoria, categorias, centro } = req.query;
     if (!data_de || !data_ate) {
       return res.status(400).json({ error: 'Informe data_de e data_ate (YYYY-MM-DD).' });
     }
@@ -18,9 +18,12 @@ export default async function handler(req, res) {
     let conjunto = null;
     if (categorias) conjunto = new Set(categorias.split('||').map(norm).filter(Boolean));
     else if (categoria) conjunto = new Set([norm(categoria)]);
+    const centroAlvo = centro ? norm(centro) : null;
 
     const todos = await buscarLancamentos({ dataInicio: data_de, dataFim: data_ate, regime });
-    const itens = (conjunto ? todos.filter(l => conjunto.has(norm(l.categoria))) : todos)
+    const itens = todos
+      .filter(l => !conjunto || conjunto.has(norm(l.categoria)))
+      .filter(l => !centroAlvo || (l.centrosCusto || []).some(c => norm(c) === centroAlvo))
       .map(l => ({
         data: l.data,
         descricao: l.descricao,
