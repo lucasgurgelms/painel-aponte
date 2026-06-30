@@ -9,14 +9,18 @@ import { exigirLogin } from '../../lib/auth.js';
 export default async function handler(req, res) {
   try {
     if (!await exigirLogin(req, res)) return;
-    const { data_de, data_ate, regime = 'caixa', categoria } = req.query;
+    const { data_de, data_ate, regime = 'caixa', categoria, categorias } = req.query;
     if (!data_de || !data_ate) {
       return res.status(400).json({ error: 'Informe data_de e data_ate (YYYY-MM-DD).' });
     }
 
+    // Aceita uma categoria única (categoria) ou uma lista (categorias, separada por "||").
+    let conjunto = null;
+    if (categorias) conjunto = new Set(categorias.split('||').map(norm).filter(Boolean));
+    else if (categoria) conjunto = new Set([norm(categoria)]);
+
     const todos = await buscarLancamentos({ dataInicio: data_de, dataFim: data_ate, regime });
-    const alvo = categoria ? norm(categoria) : null;
-    const itens = (alvo ? todos.filter(l => norm(l.categoria) === alvo) : todos)
+    const itens = (conjunto ? todos.filter(l => conjunto.has(norm(l.categoria))) : todos)
       .map(l => ({
         data: l.data,
         descricao: l.descricao,

@@ -435,29 +435,37 @@ const SCREENS={
     const s=d.subtotais;
     const view=window._dreView||'sint';
     let rows=[];
-    rows.push(['RECEITA OPERACIONAL BRUTA', s.receitaOperacionalBruta, 'h']);
-    // grupos de receita operacional
+    const ks = o => Object.keys(o||{});
+    const catsRecOp=[], catsRecNaoOp=[], catsDesp=[];
+    for(const info of Object.values(d.receitasPorGrupo)){
+      (info.tipo==='nao_operacional'?catsRecNaoOp:catsRecOp).push(...ks(info.categorias));
+    }
+    for(const info of Object.values(d.despesasPorGrupo)) catsDesp.push(...ks(info.categorias));
+
+    rows.push(['RECEITA OPERACIONAL BRUTA', s.receitaOperacionalBruta, 'h', catsRecOp]);
     for(const [grupo,info] of Object.entries(d.receitasPorGrupo)){
       if(info.tipo!=='operacional') continue;
-      rows.push([grupo, info.total, 'i']);
-      if(view==='anal') for(const [cat,v] of Object.entries(info.categorias)) rows.push([cat, v, 'sub']);
+      rows.push([grupo, info.total, 'i', ks(info.categorias)]);
+      if(view==='anal') for(const [cat,v] of Object.entries(info.categorias)) rows.push([cat, v, 'sub', [cat]]);
     }
-    rows.push(['(−) Deduções — taxas de cartão', -s.deducoes, 'i']);
-    if(view==='anal' && d.deducoes) for(const [cat,v] of Object.entries(d.deducoes.categorias)) rows.push([cat,-v,'sub']);
+    rows.push(['(−) Deduções — taxas de cartão', -s.deducoes, 'i', ks(d.deducoes&&d.deducoes.categorias)]);
+    if(view==='anal' && d.deducoes) for(const [cat,v] of Object.entries(d.deducoes.categorias)) rows.push([cat,-v,'sub',[cat]]);
     rows.push(['= RECEITA OPERACIONAL LÍQUIDA', s.receitaLiquida, 's']);
-    rows.push(['(−) DESPESAS OPERACIONAIS', -s.despesaTotal, 'h']);
+    rows.push(['(−) DESPESAS OPERACIONAIS', -s.despesaTotal, 'h', catsDesp]);
     for(const [grupo,info] of Object.entries(d.despesasPorGrupo)){
-      rows.push([grupo, -info.total, 'i']);
-      if(view==='anal') for(const [cat,v] of Object.entries(info.categorias)) rows.push([cat,-v,'sub']);
+      rows.push([grupo, -info.total, 'i', ks(info.categorias)]);
+      if(view==='anal') for(const [cat,v] of Object.entries(info.categorias)) rows.push([cat,-v,'sub',[cat]]);
     }
     rows.push(['= RESULTADO OPERACIONAL', s.resultadoOperacional, 's']);
-    if(s.receitaNaoOperacional) rows.push(['(+) Rendimentos de aplicações', s.receitaNaoOperacional, 'i']);
+    if(s.receitaNaoOperacional) rows.push(['(+) Rendimentos de aplicações', s.receitaNaoOperacional, 'i', catsRecNaoOp]);
     rows.push(['= RESULTADO LÍQUIDO', s.resultadoLiquido, 'r']);
 
-    const body=rows.map(([l,v,t])=>{
+    const body=rows.map(([l,v,t,cats])=>{
       let vc='var(--text)'; if(v<0&&(t==='i'||t==='sub'))vc=COL.red; if(t==='r')vc='var(--accent)';
-      const cli = t==='sub' ? ` data-cat="${String(l).replace(/"/g,'&quot;')}" onclick="verRazao(this.dataset.cat)" style="cursor:pointer" title="Ver lançamentos"` : '';
-      return `<div class="dre-row ${t}"${cli}><span>${l}${t==='sub'?' <span style="color:var(--muted);font-size:10px">›</span>':''}</span><span class="num" style="color:${vc}">${fmt(v)}</span></div>`;
+      const clik = Array.isArray(cats) && cats.length>0;
+      const attrs = clik ? ` data-cats="${encodeURIComponent(JSON.stringify(cats))}" data-tit="${String(l).replace(/"/g,'&quot;')}" onclick="verRazao(this.dataset.tit, JSON.parse(decodeURIComponent(this.dataset.cats)))" style="cursor:pointer" title="Ver lançamentos"` : '';
+      const seta = clik ? ' <span style="color:var(--muted);font-size:10px">›</span>' : '';
+      return `<div class="dre-row ${t}"${attrs}><span>${l}${seta}</span><span class="num" style="color:${vc}">${fmt(v)}</span></div>`;
     }).join('');
 
     const m=d.memoria||{};
@@ -704,10 +712,11 @@ function abrirModal(titulo,html){
 }
 function setModalBody(html){ document.getElementById('modal-body').innerHTML=html; }
 window.fecharModal=()=>document.getElementById('modal').classList.add('hidden');
-window.verRazao=async(cat)=>{
-  abrirModal(`Lançamentos · ${cat}`, '<div class="loading">Carregando lançamentos…</div>');
+window.verRazao=async(titulo, cats)=>{
+  abrirModal(`Lançamentos · ${titulo}`, '<div class="loading">Carregando lançamentos…</div>');
   try{
-    const url=`/api/contaazul/lancamentos?data_de=${dataDe}&data_ate=${dataAte}&regime=${regime}&categoria=${encodeURIComponent(cat)}`;
+    const lista = Array.isArray(cats) ? cats : [cats];
+    const url=`/api/contaazul/lancamentos?data_de=${dataDe}&data_ate=${dataAte}&regime=${regime}&categorias=${encodeURIComponent(lista.join('||'))}`;
     const d=await fetch(url,{ headers: await authHeaders() }).then(r=>r.json());
     if(d.error){ setModalBody(`<div style="color:var(--red)">${d.error}</div>`); return; }
     const linhas=(d.itens||[]).map(i=>`<div class="dre-row i" style="cursor:default">
