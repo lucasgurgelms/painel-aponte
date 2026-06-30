@@ -1,13 +1,12 @@
 // api/contaazul/inspecionar.js
-// Endpoint TEMPORÁRIO de diagnóstico. Bate nos endpoints reais de busca da API
-// v2 (contas a receber e a pagar) e devolve o schema cru: chaves do wrapper de
-// paginação, chaves do primeiro item e uma amostra. Serve para confirmarmos os
-// nomes reais dos campos e ajustar lib/analytics.js + lib/dre-config.js.
-// Protegido pela mesma chave de setup. Pode ser removido depois.
+// Endpoint TEMPORÁRIO de diagnóstico. Protegido pela chave de setup.
+// Modos:
+//   (default)        schema cru de um item de cada origem
+//   ?modo=inventario distinct de categorias e centros de custo + item em aberto
+//   ?modo=endpoints  sonda endpoints candidatos (saldos/contas financeiras)
 
 import { caFetch, getValidAccessToken } from '../../lib/contaazul.js';
 
-// Descobre QUAL conta/usuário está conectado (userInfo do servidor OAuth).
 async function quemEstaConectado() {
   try {
     const token = await getValidAccessToken();
@@ -17,73 +16,97 @@ async function quemEstaConectado() {
     const txt = await r.text();
     let body; try { body = JSON.parse(txt); } catch { body = txt; }
     return { status: r.status, body };
-  } catch (err) {
-    return { erro: err.message };
-  }
+  } catch (err) { return { erro: err.message }; }
 }
 
-// Tenta GET com query; se o endpoint exigir POST com corpo, tenta de novo.
-async function sondar(path, params) {
-  try {
-    const resp = await caFetch(path, { method: 'GET', query: params });
-    return { ok: true, metodo: 'GET', resp };
-  } catch (errGet) {
-    try {
-      const resp = await caFetch(path, { method: 'POST', body: params });
-      return { ok: true, metodo: 'POST', resp };
-    } catch (errPost) {
-      return { ok: false, erroGet: errGet.message, erroPost: errPost.message };
-    }
-  }
+async function buscarComFallback(path, params) {
+  try { return await caFetch(path, { method: 'GET', query: params }); }
+  catch (_) { return await caFetch(path, { method: 'POST', body: params }); }
 }
 
-function resumir(resultado) {
-  if (!resultado.ok) return resultado;
-  const { resp, metodo } = resultado;
-  const itens = (resp && (resp.itens || resp.content || resp.data || resp.items)) || [];
-  return {
-    ok: true,
-    metodo,
-    chaves_resposta: resp && typeof resp === 'object' ? Object.keys(resp) : [],
-    itens_totais: resp ? resp.itens_totais : undefined,
-    totais: resp ? resp.totais : undefined,
-    total_itens_amostra: Array.isArray(itens) ? itens.length : 0,
-    chaves_do_primeiro_item: itens[0] ? Object.keys(itens[0]) : [],
-    amostra_primeiro_item: itens[0] || null,
-  };
+// Percorre todas as páginas de uma origem (cap de segurança).
+async function todasPaginas(tipo, data_de, data_ate, maxPaginas = 30) {
+  const path = `/financeiro/eventos-financeiros/${tipo}/buscar`;
+  const itens = [];
+  let pagina = 1;
+  while (pagina <= maxPaginas) {
+    const resp = await buscarComFallback(path, {
+      pagina, tamanho_pagina: 100,
+      data_vencimento_de: data_de, data_vencimento_ate: data_ate,
+    });
+    const lote = (resp && (resp.itens || resp.content || resp.data)) || [];
+    itens.push(...lote);
+    const total = Number(resp?.itens_totais ?? lote.length);
+    if (lote.length === 0 || pagina * 100 >= total) break;
+    pagina++;
+  }
+  return itens;
 }
 
 export default async function handler(req, res) {
   if (req.query.key !== process.env.CA_SETUP_SECRET) {
     return res.status(401).json({ error: 'Chave inválida.' });
   }
+  const modo = req.query.modo || 'schema';
+  const data_de = req.query.data_de || '2026-01-01';
+  const data_ate = req.query.data_ate || '2026-12-31';
 
   try {
-    const data_de = req.query.data_de || '2026-05-01';
-    const data_ate = req.query.data_ate || '2026-05-31';
+    if (modo === 'inventario') {
+      const [receber, pagar] = await Promise.all([
+        todasPaginas('contas-a-receber', data_de, data_ate),
+        todasPaginas('contas-a-pagar', data_de, data_ate),
+      ]);
+      const cats = new Set(), centros = new Set(), status = new Set();
+      let exemploAberto = null;
+      const coletar = (arr, origem) => {
+        for (const l of arr) {
+          (l.categorias || []).forEach(c => cats.add(`${origem}\t${c?.nome}`));
+          (l.centros_de_custo || []).forEach(c => centros.add(c?.nome));
+          if (l.status_traduzido) status.add(l.status_traduzido);
+          if (!exemploAberto && Number(l.nao_pago) > 0) exemploAberto = { origem, ...l };
+        }
+      };
+      coletar(receber, 'receber'); coletar(pagar, 'pagar');
+      return res.status(200).json({
+        periodo: { data_de, data_ate },
+        qtd: { receber: receber.length, pagar: pagar.length },
+        categorias: [...cats].sort(),
+        centros_de_custo: [...centros].filter(Boolean).sort(),
+        status_distintos: [...status],
+        exemplo_item_em_aberto: exemploAberto,
+      });
+    }
 
-    // ?sem_filtro=1 → não envia filtro de data (pra saber se a conta tem dados
-    // e descobrir o schema real de um item, independente do nome do param de data).
-    const semFiltro = req.query.sem_filtro === '1';
-    const params = semFiltro
-      ? { pagina: 1, tamanho_pagina: 50 }
-      : {
-          pagina: 1,
-          tamanho_pagina: 50,
-          data_vencimento_de: data_de,
-          data_vencimento_ate: data_ate,
-        };
+    if (modo === 'endpoints') {
+      const candidatos = [
+        '/financeiro/contas-financeiras',
+        '/financeiro/contas-financeiras/buscar',
+        '/financeiro/contas',
+        '/financeiro/saldos',
+        '/conta-financeira',
+        '/contas-financeiras',
+      ];
+      const out = {};
+      for (const p of candidatos) {
+        try {
+          const r = await caFetch(p, { method: 'GET', query: { pagina: 1, tamanho_pagina: 5 } });
+          out[p] = { ok: true, chaves: r && typeof r === 'object' ? Object.keys(r) : typeof r, amostra: Array.isArray(r?.itens) ? r.itens[0] : (Array.isArray(r) ? r[0] : r) };
+        } catch (err) { out[p] = { ok: false, erro: err.message }; }
+      }
+      return res.status(200).json(out);
+    }
 
+    // default: schema cru
     const [receber, pagar] = await Promise.all([
-      sondar('/financeiro/eventos-financeiros/contas-a-receber/buscar', params),
-      sondar('/financeiro/eventos-financeiros/contas-a-pagar/buscar', params),
+      buscarComFallback('/financeiro/eventos-financeiros/contas-a-receber/buscar', { pagina: 1, tamanho_pagina: 5, data_vencimento_de: data_de, data_vencimento_ate: data_ate }),
+      buscarComFallback('/financeiro/eventos-financeiros/contas-a-pagar/buscar', { pagina: 1, tamanho_pagina: 5, data_vencimento_de: data_de, data_vencimento_ate: data_ate }),
     ]);
-
-    res.status(200).json({
-      periodo: { data_de, data_ate },
+    const amostra = r => (r?.itens || [])[0] || null;
+    return res.status(200).json({
       conta_conectada: await quemEstaConectado(),
-      contas_a_receber: resumir(receber),
-      contas_a_pagar: resumir(pagar),
+      receber: { itens_totais: receber?.itens_totais, chaves: amostra(receber) ? Object.keys(amostra(receber)) : [], exemplo: amostra(receber) },
+      pagar: { itens_totais: pagar?.itens_totais, chaves: amostra(pagar) ? Object.keys(amostra(pagar)) : [], exemplo: amostra(pagar) },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
