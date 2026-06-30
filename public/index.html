@@ -616,7 +616,7 @@ const SCREENS={
       else if(eventosDetalhe.erro) detalhe=`<div class="panel" style="margin-top:14px;color:var(--red)">${eventosDetalhe.erro}</div>`;
       else if(!eventosDetalhe.length) detalhe='<div class="panel" style="margin-top:14px"><div style="color:var(--text2)">Nenhum lançamento de evento no período.</div></div>';
       else detalhe=`<h3 style="margin-top:16px">Por evento</h3><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">${eventosDetalhe.map(e=>`<div class="unit-card">
-        <div class="name">${e.nome}</div>
+        <div class="name" title="${e.nome.replace(/"/g,'&quot;')}" style="display:block">${e.nome.length>46?e.nome.slice(0,46)+'…':e.nome}</div>
         <div class="line"><span>Entrada</span><span class="num" style="color:${COL.teal}">${fmtk(e.entrada)}</span></div>
         <div class="line"><span>Saída</span><span class="num" style="color:${COL.red}">${fmtk(e.saida)}</span></div>
         <div class="res"><span>Resultado</span><span class="num" style="color:${e.resultado>=0?COL.teal:COL.red}">${fmtk(e.resultado)}</span></div>
