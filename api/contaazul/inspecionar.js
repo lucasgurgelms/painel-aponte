@@ -1,10 +1,40 @@
 // api/contaazul/inspecionar.js
-// Endpoint TEMPORÁRIO de diagnóstico. Retorna uma amostra dos lançamentos crus
-// e a lista de categorias e centros de custo distintos que vêm da API deste
-// cliente. Serve para confirmarmos os nomes reais e ajustar o lib/dre-config.js.
+// Endpoint TEMPORÁRIO de diagnóstico. Bate nos endpoints reais de busca da API
+// v2 (contas a receber e a pagar) e devolve o schema cru: chaves do wrapper de
+// paginação, chaves do primeiro item e uma amostra. Serve para confirmarmos os
+// nomes reais dos campos e ajustar lib/analytics.js + lib/dre-config.js.
 // Protegido pela mesma chave de setup. Pode ser removido depois.
 
 import { caFetch } from '../../lib/contaazul.js';
+
+// Tenta GET com query; se o endpoint exigir POST com corpo, tenta de novo.
+async function sondar(path, params) {
+  try {
+    const resp = await caFetch(path, { method: 'GET', query: params });
+    return { ok: true, metodo: 'GET', resp };
+  } catch (errGet) {
+    try {
+      const resp = await caFetch(path, { method: 'POST', body: params });
+      return { ok: true, metodo: 'POST', resp };
+    } catch (errPost) {
+      return { ok: false, erroGet: errGet.message, erroPost: errPost.message };
+    }
+  }
+}
+
+function resumir(resultado) {
+  if (!resultado.ok) return resultado;
+  const { resp, metodo } = resultado;
+  const itens = (resp && (resp.itens || resp.content || resp.data || resp.items)) || [];
+  return {
+    ok: true,
+    metodo,
+    chaves_resposta: resp && typeof resp === 'object' ? Object.keys(resp) : [],
+    total_itens_amostra: Array.isArray(itens) ? itens.length : 0,
+    chaves_do_primeiro_item: itens[0] ? Object.keys(itens[0]) : [],
+    amostra_primeiro_item: itens[0] || null,
+  };
+}
 
 export default async function handler(req, res) {
   if (req.query.key !== process.env.CA_SETUP_SECRET) {
@@ -15,33 +45,22 @@ export default async function handler(req, res) {
     const data_de = req.query.data_de || '2026-05-01';
     const data_ate = req.query.data_ate || '2026-05-31';
 
-    const resp = await caFetch('/financeiro/eventos-financeiros/busca', {
-      query: { pagina: 1, tamanho_pagina: 100, data_de, data_ate, regime: 'caixa' },
-    });
+    const params = {
+      pagina: 1,
+      tamanho_pagina: 50,
+      data_vencimento_de: data_de,
+      data_vencimento_ate: data_ate,
+    };
 
-    const itens = (resp && (resp.itens || resp.content || resp.data)) || [];
-
-    // Coleta nomes distintos para conferência
-    const categorias = new Set();
-    const centrosCusto = new Set();
-    const tipos = new Set();
-    for (const l of itens) {
-      const cat = l.categoria?.nome ?? l.categoria ?? l.category;
-      if (cat) categorias.add(typeof cat === 'string' ? cat : JSON.stringify(cat));
-      const cc = l.centros_custo ?? l.centrosCusto ?? l.centro_custo ?? l.costCenters;
-      if (Array.isArray(cc)) cc.forEach(x => centrosCusto.add(typeof x === 'string' ? x : (x.nome ?? x.name ?? JSON.stringify(x))));
-      else if (cc) centrosCusto.add(typeof cc === 'string' ? cc : JSON.stringify(cc));
-      const tp = l.tipo_operacao ?? l.tipo ?? l.operationType;
-      if (tp) tipos.add(tp);
-    }
+    const [receber, pagar] = await Promise.all([
+      sondar('/financeiro/eventos-financeiros/contas-a-receber/buscar', params),
+      sondar('/financeiro/eventos-financeiros/contas-a-pagar/buscar', params),
+    ]);
 
     res.status(200).json({
-      total_itens_amostra: itens.length,
-      chaves_do_primeiro_item: itens[0] ? Object.keys(itens[0]) : [],
-      amostra_primeiro_item: itens[0] || null,
-      categorias_distintas: [...categorias].sort(),
-      centros_custo_distintos: [...centrosCusto].sort(),
-      tipos_distintos: [...tipos],
+      periodo: { data_de, data_ate },
+      contas_a_receber: resumir(receber),
+      contas_a_pagar: resumir(pagar),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
