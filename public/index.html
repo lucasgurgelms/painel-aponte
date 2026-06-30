@@ -230,7 +230,7 @@ async function carregar(){
   loading=true; render();
   try{
     const url=`/api/contaazul/analytics?data_de=${dataDe}&data_ate=${dataAte}&regime=${regime}`;
-    const r=await fetch(url);
+    const r=await fetch(url, { headers: await authHeaders() });
     if(!r.ok){ throw new Error((await r.json()).error||'Erro'); }
     analytics=await r.json();
   }catch(e){
@@ -243,7 +243,7 @@ async function carregar(){
 async function carregarFluxo(){
   if(fluxo||fluxoLoading) return;
   fluxoLoading=true; render();
-  try{ fluxo=await fetch('/api/contaazul/fluxo?dias=365').then(r=>r.json()); }
+  try{ fluxo=await fetch('/api/contaazul/fluxo?dias=365',{ headers: await authHeaders() }).then(r=>r.json()); }
   catch(e){ fluxo={ erro:e.message }; }
   fluxoLoading=false; render();
 }
@@ -251,7 +251,7 @@ async function carregarFluxo(){
 async function carregarMetas(tipo){
   if(metasByTipo[tipo]) return;
   try{
-    const arr=await fetch(`/api/metas?tipo=${tipo}`).then(r=>r.json());
+    const arr=await fetch(`/api/metas?tipo=${tipo}`,{ headers: await authHeaders() }).then(r=>r.json());
     const m={}; (arr||[]).forEach(x=>{ m[x.chave]=Number(x.valor)||0; });
     metasByTipo[tipo]=m;
   }catch(_){ metasByTipo[tipo]={}; }
@@ -259,7 +259,7 @@ async function carregarMetas(tipo){
 }
 async function salvarMeta(tipo,chave,valor){
   const ano=Number((dataDe||'2026').slice(0,4))||2026;
-  await fetch('/api/metas',{method:'POST',headers:{'Content-Type':'application/json'},
+  await fetch('/api/metas',{method:'POST',headers:{'Content-Type':'application/json',...(await authHeaders())},
     body:JSON.stringify({ tipo, chave, valor:Number(valor)||0, ano })});
   (metasByTipo[tipo]=metasByTipo[tipo]||{})[chave]=Number(valor)||0;
 }

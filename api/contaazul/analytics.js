@@ -6,9 +6,11 @@ import { buscarLancamentos } from '../../lib/analytics.js';
 import {
   montarDRE, montarUnidades, montarReceitasDespesas, montarTotais,
 } from '../../lib/analytics.js';
+import { exigirLogin } from '../../lib/auth.js';
 
 export default async function handler(req, res) {
   try {
+    if (!await exigirLogin(req, res)) return;
     const {
       data_de,
       data_ate,

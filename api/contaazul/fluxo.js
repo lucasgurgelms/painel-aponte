@@ -6,6 +6,7 @@
 
 import { caFetch } from '../../lib/contaazul.js';
 import { norm, foraDaDRE, unidadeDoCentroCusto } from '../../lib/dre-config.js';
+import { exigirLogin } from '../../lib/auth.js';
 
 const DIA = 86400000;
 
@@ -37,6 +38,7 @@ function centroNomes(l) {
 
 export default async function handler(req, res) {
   try {
+    if (!await exigirLogin(req, res)) return;
     const hoje = req.query.hoje ? new Date(req.query.hoje + 'T00:00:00') : new Date();
     const dias = Number(req.query.dias) || 365;
     const desde = new Date(hoje.getTime() - 90 * DIA); // inclui vencidos recentes
