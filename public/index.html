@@ -651,6 +651,10 @@ const SCREENS={
         </div>
         <div class="err" id="nu-msg"></div>
         <p style="color:var(--muted);font-size:11px;margin-top:8px">O convite envia um e-mail para a pessoa criar a própria senha. Se o e-mail não chegar, depende da configuração SMTP do Supabase (Authentication → Emails).</p>
+      </div>
+      <div class="panel" style="margin-top:14px"><h3>Conexão Conta Azul</h3>
+        <p style="color:var(--text2);font-size:12px;margin-bottom:10px">Se os dados pararem de carregar (conexão expirada), reconecte aqui — abre o login do Conta Azul e renova o acesso.</p>
+        <button class="btn btn-ghost" onclick="reconectarCA()">Reconectar Conta Azul</button>
       </div>`;
   },
 };
@@ -712,6 +716,12 @@ function abrirModal(titulo,html){
 }
 function setModalBody(html){ document.getElementById('modal-body').innerHTML=html; }
 window.fecharModal=()=>document.getElementById('modal').classList.add('hidden');
+window.reconectarCA=async()=>{
+  try{
+    const d=await fetch('/api/auth/reconectar',{ headers: await authHeaders() }).then(r=>r.json());
+    if(d.url){ window.location.href=d.url; } else { alert(d.error||'Não foi possível reconectar.'); }
+  }catch(e){ alert(e.message); }
+};
 window.verRazao=async(titulo, cats)=>{
   abrirModal(`Lançamentos · ${titulo}`, '<div class="loading">Carregando lançamentos…</div>');
   try{
