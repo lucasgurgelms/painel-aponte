@@ -21,7 +21,10 @@ export default async function handler(req, res) {
     const meses = {};
     for (let m = 1; m <= 12; m++) meses[m] = { entradas: 0, saidas: 0 };
     for (const l of lancamentos) {
-      const mes = Number(String(l.data || '').slice(5, 7));
+      // agrupa por vencimento (igual aos cards/DRE), não pela competência (que pode ser de anos atrás)
+      const venc = String(l.vencimento || l.data || '');
+      if (venc.slice(0, 4) !== String(ano)) continue; // ignora vencimentos fora do ano
+      const mes = Number(venc.slice(5, 7));
       if (!mes || !meses[mes]) continue;
       if (l.credito) meses[mes].entradas += l.valor;
       else meses[mes].saidas += l.valor;
