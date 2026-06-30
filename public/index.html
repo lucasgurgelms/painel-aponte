@@ -166,6 +166,14 @@
     <span data-p="custom" onclick="setPeriodo('custom')">Personalizado</span>
   </div>
 
+  <div id="custom-range" class="periods hidden" style="align-items:center;margin-top:-6px">
+    <span style="color:var(--text2);border:none;padding:6px 0">De</span>
+    <input type="date" id="cd-de" style="width:auto;padding:6px 10px">
+    <span style="color:var(--text2);border:none;padding:6px 0">até</span>
+    <input type="date" id="cd-ate" style="width:auto;padding:6px 10px">
+    <span class="on" style="cursor:pointer" onclick="aplicarCustom()">Aplicar</span>
+  </div>
+
   <div class="tabs" id="tabs"></div>
   <div id="screen"><div class="loading">Carregando…</div></div>
 </div>
@@ -255,6 +263,14 @@ async function carregarPerfil(){
 function setPeriodo(p){
   periodo=p;
   document.querySelectorAll('#periods span').forEach(s=>s.classList.toggle('on', s.dataset.p===p));
+  const cr=document.getElementById('custom-range');
+  if(p==='custom'){
+    document.getElementById('cd-de').value=dataDe;
+    document.getElementById('cd-ate').value=dataAte;
+    cr.classList.remove('hidden');
+    return; // espera o usuário escolher as datas e clicar Aplicar
+  }
+  if(cr) cr.classList.add('hidden');
   const now=new Date(2026,4,31); // referência maio/2026 (ajustar p/ data real depois)
   const y=now.getFullYear(), m=now.getMonth();
   const iso=d=>d.toISOString().slice(0,10);
@@ -262,8 +278,13 @@ function setPeriodo(p){
   if(p==='tri'){ dataDe=iso(new Date(y,m-2,1)); dataAte=iso(new Date(y,m+1,0)); }
   if(p==='sem'){ dataDe=iso(new Date(y,m-5,1)); dataAte=iso(new Date(y,m+1,0)); }
   if(p==='ano'){ dataDe=iso(new Date(y,0,1)); dataAte=iso(new Date(y,11,31)); }
-  if(p==='custom'){ /* abrir date pickers — simplificado por ora */ }
   carregar();
+}
+function aplicarCustom(){
+  const de=document.getElementById('cd-de').value, ate=document.getElementById('cd-ate').value;
+  if(!de||!ate){ return; }
+  if(de>ate){ alert('A data inicial não pode ser maior que a final.'); return; }
+  dataDe=de; dataAte=ate; fluxo=null; carregar();
 }
 function setRegime(r){
   regime=r;
@@ -386,7 +407,7 @@ const SCREENS={
     return `<div class="grid cards" style="margin-bottom:18px">
       <div class="card"><div class="lbl">Entradas</div><div class="val" style="color:${COL.teal}">${fmt(t.entradas)}</div></div>
       <div class="card"><div class="lbl">Saídas</div><div class="val" style="color:${COL.red}">${fmt(t.saidas)}</div></div>
-      <div class="card"><div class="lbl">Resultado</div><div class="val" style="color:${COL.blue}">${fmt(t.resultado)}</div></div>
+      <div class="card"><div class="lbl">Resultado</div><div class="val" style="color:${t.resultado>=0?COL.blue:COL.red}">${fmt(t.resultado)}</div></div>
       <div class="card"><div class="lbl">Lançamentos</div><div class="val">${analytics.qtdLancamentos||0}</div></div>
     </div>
     <h3 style="font-size:13.5px;margin-bottom:10px">Resultado por unidade</h3>
@@ -440,18 +461,13 @@ const SCREENS={
   },
 
   recdesp(){
-    const rd=analytics.receitasDespesas||{receitas:[],despesas:[]};
-    const r=rd.receitas.slice(0,10), d=rd.despesas.slice(0,10);
-    const maxr=Math.max(1,...r.map(x=>x.valor)), maxd=Math.max(1,...d.map(x=>x.valor));
+    const f=window._rdFiltro||'ambos';
+    const chip=(v,l)=>`<span class="chip" style="cursor:pointer;${f===v?'background:var(--accent-bg);color:var(--accent);border-color:transparent':''}" onclick="setRdFiltro('${v}')">${l}</span>`;
     return `<div class="filterbar">
-      <div class="search"><span style="color:var(--muted)">⌕</span><input placeholder="Buscar descrição…"></div>
-      <span class="chip">Unidade</span><span class="chip">Categoria</span></div>
-    <div class="grid grid-2">
-      <div><h3 style="color:${COL.teal}">Receitas por categoria</h3>
-        <div class="panel">${r.map(x=>bar(x.categoria,x.valor,maxr,COL.teal)).join('')||'—'}</div></div>
-      <div><h3 style="color:${COL.red}">Despesas por categoria</h3>
-        <div class="panel">${d.map(x=>bar(x.categoria,x.valor,maxd,COL.red)).join('')||'—'}</div></div>
-    </div>`;
+      <div class="search"><span style="color:var(--muted)">⌕</span>
+        <input id="rd-busca" placeholder="Buscar categoria…" oninput="filtrarRD()" value="${(window._rdBusca||'').replace(/"/g,'&quot;')}"></div>
+      ${chip('ambos','Tudo')}${chip('receitas','Só receitas')}${chip('despesas','Só despesas')}</div>
+    <div class="grid ${f==='ambos'?'grid-2':''}" id="rd-grid">${rdGridHTML()}</div>`;
   },
 
   unidades(){
@@ -638,6 +654,30 @@ window.salvarCamp=async()=>{
   window._campEdit=false; render();
 };
 window.setSub=setSub;
+
+// Receitas e despesas: busca por categoria + filtro de tipo.
+function rdGridHTML(){
+  const rd=(analytics&&analytics.receitasDespesas)||{receitas:[],despesas:[]};
+  const termo=(window._rdBusca||'').toLowerCase();
+  const filtro=window._rdFiltro||'ambos';
+  const filtra=arr=>arr.filter(x=>(x.categoria||'').toLowerCase().includes(termo));
+  const r=filtra(rd.receitas), d=filtra(rd.despesas);
+  const maxr=Math.max(1,...r.map(x=>x.valor)), maxd=Math.max(1,...d.map(x=>x.valor));
+  const vazio='<div style="color:var(--text2)">Nada encontrado.</div>';
+  const blocoR=`<div><h3 style="color:${COL.teal}">Receitas por categoria</h3>
+    <div class="panel">${r.map(x=>bar(x.categoria,x.valor,maxr,COL.teal)).join('')||vazio}</div></div>`;
+  const blocoD=`<div><h3 style="color:${COL.red}">Despesas por categoria</h3>
+    <div class="panel">${d.map(x=>bar(x.categoria,x.valor,maxd,COL.red)).join('')||vazio}</div></div>`;
+  if(filtro==='receitas') return blocoR;
+  if(filtro==='despesas') return blocoD;
+  return blocoR+blocoD;
+}
+window.filtrarRD=()=>{
+  const inp=document.getElementById('rd-busca'); window._rdBusca=inp?inp.value:'';
+  const g=document.getElementById('rd-grid'); if(g) g.innerHTML=rdGridHTML();
+};
+window.setRdFiltro=(v)=>{ window._rdFiltro=v; render(); };
+window.aplicarCustom=aplicarCustom;
 
 window.setDreView=v=>{ window._dreView=v; render(); };
 window.go=go; window.setPeriodo=setPeriodo; window.setRegime=setRegime;
