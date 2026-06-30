@@ -5,7 +5,22 @@
 // nomes reais dos campos e ajustar lib/analytics.js + lib/dre-config.js.
 // Protegido pela mesma chave de setup. Pode ser removido depois.
 
-import { caFetch } from '../../lib/contaazul.js';
+import { caFetch, getValidAccessToken } from '../../lib/contaazul.js';
+
+// Descobre QUAL conta/usuário está conectado (userInfo do servidor OAuth).
+async function quemEstaConectado() {
+  try {
+    const token = await getValidAccessToken();
+    const r = await fetch('https://auth.contaazul.com/oauth2/userInfo', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const txt = await r.text();
+    let body; try { body = JSON.parse(txt); } catch { body = txt; }
+    return { status: r.status, body };
+  } catch (err) {
+    return { erro: err.message };
+  }
+}
 
 // Tenta GET com query; se o endpoint exigir POST com corpo, tenta de novo.
 async function sondar(path, params) {
@@ -66,6 +81,7 @@ export default async function handler(req, res) {
 
     res.status(200).json({
       periodo: { data_de, data_ate },
+      conta_conectada: await quemEstaConectado(),
       contas_a_receber: resumir(receber),
       contas_a_pagar: resumir(pagar),
     });
