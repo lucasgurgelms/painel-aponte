@@ -30,6 +30,8 @@ function resumir(resultado) {
     ok: true,
     metodo,
     chaves_resposta: resp && typeof resp === 'object' ? Object.keys(resp) : [],
+    itens_totais: resp ? resp.itens_totais : undefined,
+    totais: resp ? resp.totais : undefined,
     total_itens_amostra: Array.isArray(itens) ? itens.length : 0,
     chaves_do_primeiro_item: itens[0] ? Object.keys(itens[0]) : [],
     amostra_primeiro_item: itens[0] || null,
@@ -45,12 +47,17 @@ export default async function handler(req, res) {
     const data_de = req.query.data_de || '2026-05-01';
     const data_ate = req.query.data_ate || '2026-05-31';
 
-    const params = {
-      pagina: 1,
-      tamanho_pagina: 50,
-      data_vencimento_de: data_de,
-      data_vencimento_ate: data_ate,
-    };
+    // ?sem_filtro=1 → não envia filtro de data (pra saber se a conta tem dados
+    // e descobrir o schema real de um item, independente do nome do param de data).
+    const semFiltro = req.query.sem_filtro === '1';
+    const params = semFiltro
+      ? { pagina: 1, tamanho_pagina: 50 }
+      : {
+          pagina: 1,
+          tamanho_pagina: 50,
+          data_vencimento_de: data_de,
+          data_vencimento_ate: data_ate,
+        };
 
     const [receber, pagar] = await Promise.all([
       sondar('/financeiro/eventos-financeiros/contas-a-receber/buscar', params),
