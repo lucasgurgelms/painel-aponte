@@ -160,7 +160,13 @@ let analytics=null, activeTab='geral', loading=false;
 let fluxo=null, fluxoLoading=false;
 let metasByTipo={}; // { orcamento:{chave:valor}, campanha:{...} }
 let papel=null, podeEditar=true; // definidos após login (papéis de usuário)
+let usuarios=null; // lista de perfis (aba admin)
 let subview={}; // sub-aba ativa por tela
+
+async function authHeaders(){
+  const { data:{ session } } = await supa.auth.getSession();
+  return session ? { Authorization:`Bearer ${session.access_token}` } : {};
+}
 
 const fmt = n => (n<0?'-':'')+'R$ '+Math.abs(Math.round(n||0)).toLocaleString('pt-BR');
 const fmtk = n => (n<0?'-':'')+'R$ '+(Math.abs(n||0)/1000).toFixed(1).replace('.',',')+'k';
@@ -184,10 +190,19 @@ async function entrar(){
 }
 async function sair(){ await supa.auth.signOut(); location.reload(); }
 
-function mostrarApp(){
+async function mostrarApp(){
   document.getElementById('login').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
+  await carregarPerfil();
   renderTabs(); setPeriodo('mes');
+}
+// Busca o papel do usuário logado (admin|financeiro|usuario) e define se edita.
+async function carregarPerfil(){
+  try{
+    const p = await fetch('/api/perfil',{ headers: await authHeaders() }).then(r=>r.json());
+    papel = p.papel || 'usuario';
+    podeEditar = !!p.podeEditar;
+  }catch(_){ papel='usuario'; podeEditar=false; }
 }
 
 // ---------- período ----------
@@ -256,7 +271,8 @@ const TABS=[
   ['campeven','Campanhas e eventos'],['fluxo','Fluxo e patrimônio'],
 ];
 function renderTabs(){
-  document.getElementById('tabs').innerHTML=TABS.map(([id,l])=>
+  const tabs = papel==='admin' ? [...TABS, ['usuarios','Usuários']] : TABS;
+  document.getElementById('tabs').innerHTML=tabs.map(([id,l])=>
     `<button class="${id===activeTab?'on':''}" onclick="go('${id}')">${l}</button>`).join('');
 }
 function go(id){
@@ -264,8 +280,34 @@ function go(id){
   if(id==='orcamento'){ carregarMetas('orcamento'); }
   if(id==='campeven'){ carregarMetas('campanha'); carregarFluxo(); }
   if(id==='fluxo'){ carregarFluxo(); }
+  if(id==='usuarios'){ carregarUsuarios(); }
 }
 function setSub(tela,v){ subview[tela]=v; render(); }
+
+// ---------- usuários (admin) ----------
+async function carregarUsuarios(){
+  try{
+    const d=await fetch('/api/perfil?listar=1',{ headers: await authHeaders() }).then(r=>r.json());
+    usuarios=d.perfis||[];
+  }catch(_){ usuarios=[]; }
+  render();
+}
+window.alterarPapel=async(email,p)=>{
+  await fetch('/api/perfil',{method:'POST',headers:{'Content-Type':'application/json',...(await authHeaders())},
+    body:JSON.stringify({ email, papel:p })});
+  await carregarUsuarios();
+};
+window.convidarUsuario=async()=>{
+  const nome=document.getElementById('nu-nome').value.trim();
+  const email=document.getElementById('nu-email').value.trim();
+  const p=document.getElementById('nu-papel').value;
+  const msg=document.getElementById('nu-msg'); msg.style.color='var(--text2)'; msg.textContent='Enviando…';
+  const r=await fetch('/api/perfil',{method:'POST',headers:{'Content-Type':'application/json',...(await authHeaders())},
+    body:JSON.stringify({ email, nome, papel:p, convidar:true })});
+  const d=await r.json().catch(()=>({}));
+  if(r.ok){ msg.style.color='var(--teal)'; msg.textContent='Pronto — convite enviado / papel definido.'; document.getElementById('nu-email').value=''; await carregarUsuarios(); }
+  else { msg.style.color='var(--red)'; msg.textContent=(d.error||'Erro')+(d.dica?` — ${d.dica}`:''); }
+};
 
 // ---------- render ----------
 function bar(label,val,max,color){
@@ -499,6 +541,28 @@ const SCREENS={
       <div class="panel" style="margin-top:14px"><h3>Contas bancárias</h3>
         <div style="font-size:12.5px;color:var(--text2)">${(fluxo.contas||[]).map(c=>`<div class="line" style="display:flex;justify-content:space-between;padding:4px 0"><span>${c.nome}</span><span style="color:var(--muted)">${c.banco||c.tipo||''}</span></div>`).join('')||'—'}</div>
         <p style="color:var(--muted);font-size:11px;margin-top:8px">A API v2 do Conta Azul não expõe o saldo por conta — apenas o cadastro.</p></div>`;
+  },
+
+  usuarios(){
+    if(papel!=='admin') return '<div class="loading">Acesso restrito aos administradores.</div>';
+    if(!usuarios) return '<div class="loading">Carregando usuários…</div>';
+    const opt=(sel)=>['admin','financeiro','usuario'].map(p=>`<option value="${p}" ${sel===p?'selected':''}>${p}</option>`).join('');
+    const rows=usuarios.map(u=>`<tr><td>${u.nome||'—'}</td><td>${u.email}</td>
+      <td><select onchange="alterarPapel('${u.email}',this.value)">${opt(u.papel)}</select></td></tr>`).join('');
+    return `<div class="panel"><h3>Usuários e papéis</h3>
+      <p style="color:var(--text2);font-size:12px;margin-bottom:10px">admin: tudo + gestão de usuários · financeiro: vê e edita · usuario: só visualiza.</p>
+      <table class="metas"><tr><td style="color:var(--text2)">Nome</td><td style="color:var(--text2)">E-mail</td><td style="color:var(--text2)">Papel</td></tr>
+      ${rows||'<tr><td colspan="3" style="color:var(--text2)">Nenhum usuário ainda.</td></tr>'}</table></div>
+      <div class="panel" style="margin-top:14px"><h3>Convidar usuário</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div><label>Nome</label><input id="nu-nome" style="width:160px"></div>
+          <div><label>E-mail</label><input id="nu-email" type="email" style="width:230px"></div>
+          <div><label>Papel</label><select id="nu-papel" style="width:140px">${opt('usuario')}</select></div>
+          <button class="btn btn-ghost" onclick="convidarUsuario()">Convidar</button>
+        </div>
+        <div class="err" id="nu-msg"></div>
+        <p style="color:var(--muted);font-size:11px;margin-top:8px">O convite envia um e-mail para a pessoa criar a própria senha. Se o e-mail não chegar, depende da configuração SMTP do Supabase (Authentication → Emails).</p>
+      </div>`;
   },
 };
 
